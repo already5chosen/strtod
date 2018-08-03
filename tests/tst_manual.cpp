@@ -26,9 +26,9 @@ static void body(char* str)
     snprintf(diff1_buf, sizeof(diff1_buf), " %+f ULP", double((val1-val_ref)/ulp));
   }
   printf(
-   "strtoflt128  : %.21e %d '%s'\n"
-   "strtod       : %.21e %d '%s' %s%s%s\n"
-   "small_strtod : %.21e %d '%s' %s%s%s\n"
+   "strtoflt128  : %29.21e %d '%s'\n"
+   "strtod       : %29.21e %d '%s' %s%s%s\n"
+   "small_strtod : %29.21e %d '%s' %s%s%s\n"
    , val_refd, (int)(endp_ref - str), endp_ref
    , val0,     (int)(endp0 - str), endp0
    , endp0==endp_ref ? "." : "!"

@@ -42,7 +42,7 @@ static uint64_t to_double(uint64_t mant, int exp)
     return 0;
   }
   // normal range
-  mant += mant; // remove MS bit 
+  mant += mant; // remove MS bit
   uint64_t ret = ((uint64_t)exp << 52) + (mant >> 12);
   unsigned rem = mant & ((1u<<12)-1);
   rem |= (ret & 1); // to nearest even
@@ -119,6 +119,68 @@ double small_strtod(const char* str, char** endptr)
     int bine = 63-lz;
     if (exp != 0) {
       // scale uret*2**bine by 10**exp
+      const uint64_t MSB = (uint64_t)1 << 63;
+
+      uint32_t lret = 0;
+      for (; exp < 0; exp += 28) {
+        // multiply by 1E-28
+        const uint32_t MULx_H = 0x9E12835F;
+        const uint32_t MULx_L = 0x3FCD7C9E;
+        uint64_t w2 = uret >> 32;
+        uint64_t w1 = (uint32_t)uret;
+
+        uint64_t delta = (w2 * MULx_H)
+          + ((w2 * MULx_L) >> 32)
+          + ((w1 * MULx_H) >> 32);
+        uret -= (delta >> 6);
+        uint32_t delta_l = (uint32_t)delta << 26;
+        uret -= (delta_l >= lret);
+        lret -= delta_l;
+
+        bine -= 93;
+        if ((uret & MSB)==0) { // underflow
+          bine -= 1;
+          uret += uret + (lret >> 31);
+          lret += lret;
+        }
+      }
+
+      for (; exp > 2; exp -= 3) {
+        // multiply by 1000
+        uint64_t udec1 = (uret >> 6);
+        uint64_t udec2 = (uret >> 7);
+        uint32_t ldec1 = (lret >> 6) | ((uret & 0x3F) << 26);
+        uint32_t ldec2 = (lret >> 7) | ((uret & 0x7F) << 25);
+        uret -= udec1;
+        uret -= udec2;
+        uret -= (ldec1 > lret);
+        lret -= ldec1;
+        uret -= (ldec2 > lret);
+        lret -= ldec2;
+        bine += 10;
+        if ((uret & MSB)==0) { // underflow
+          bine -= 1;
+          uret += uret + (lret >> 31);
+          lret += lret;
+        }
+      }
+
+      for (; exp > 0; --exp) {
+        // multiply by 10
+        uint64_t uinc = (uret >> 2);
+        uint32_t linc = (lret >> 2) | ((uret & 3) << 30);
+        lret += linc;
+        uret += (lret < linc);
+        uret += uinc;
+        bine += 3;
+        if ((uret & MSB)==0) { // overflow
+          bine += 1;
+          lret = (lret >> 1) | ((uret & 1) << 31);
+          uret = (uret >> 1) | MSB;
+        }
+      }
+
+      uret |= (lret >> 31);
     }
     uret = to_double(uret | sticky, bine);
   }
