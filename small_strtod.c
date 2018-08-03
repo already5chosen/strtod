@@ -38,9 +38,22 @@ static uint64_t to_double(uint64_t mant, int exp)
   exp += EXP_BIAS;
   if (exp >= 2047)
     return (uint64_t)2047 << 52; // Inf
+
   if (exp < 1) {
-    return 0;
+    if (exp < -52)
+      return 0;
+
+    // subnormal
+    unsigned nFractBits = 12 - exp;
+    uint64_t FractMSB = (uint64_t)1 << (nFractBits-1);
+    uint64_t FractMsk = (uint64_t)-1 >> (64-nFractBits);
+    uint64_t fract = mant & FractMsk;
+    uint64_t ret  = (mant >> 1) >> (nFractBits-1);
+    fract |= (ret & 1); // to nearest even
+    ret += (fract > FractMSB);
+    return ret;
   }
+
   // normal range
   mant += mant; // remove MS bit
   uint64_t ret = ((uint64_t)exp << 52) + (mant >> 12);
