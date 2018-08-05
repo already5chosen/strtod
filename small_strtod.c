@@ -147,7 +147,7 @@ double small_strtod(const char* str, char** endptr)
           + ((w1 * MULx_H) >> 32);
         uret -= (delta >> 6);
         uint32_t delta_l = (uint32_t)delta << 26;
-        uret -= (delta_l >= lret);
+        uret -= (delta_l > lret);
         lret -= delta_l;
 
         bine -= 93;

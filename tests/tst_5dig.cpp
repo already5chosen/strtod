@@ -7,15 +7,39 @@
 
 extern "C" double small_strtod(const char* str, char** endptr);
 
-int main()
+int main(int argz, char** argv)
 {
+  int mant0 = 0;
+  int minExp = -323;
+  int maxExp =  309;
+  int nIntArgs = 0;
+  for (int arg_i = 1; arg_i < argz; ++arg_i) {
+    char* arg = argv[arg_i];
+    if (strcmp(arg, "-u")== 0) {
+      mant0 = 10000;
+    } else {
+      char* endp;
+      int val = strtol(arg, &endp, 0);
+      if (endp != arg) {
+        if (nIntArgs < 2) {
+          if (nIntArgs==0)
+            minExp = val;
+          maxExp = val;
+        }
+        ++nIntArgs;
+      }
+    }
+  }
+
   double minErr = 0;
   double maxErr = 0;
   int tot = 0;
   int rnd = 0;
-  const uint64_t INF_PATTERN = (uint64_t)1023 << 52;
-  for (int exp = -323; exp < 310; ++exp) {
-    for (int mant = 0; mant < 100000; ++mant) {
+  const uint64_t INF_PATTERN = (uint64_t)2047 << 52;
+  for (int exp = minExp; exp <= maxExp; ++exp) {
+    double expMinErr = 0;
+    double expMaxErr = 0;
+    for (int mant = mant0; mant < 100000; ++mant) {
       char inpbuf[80];
       sprintf(inpbuf, ".%de%d", mant, exp);
       char* endp0;
@@ -43,6 +67,12 @@ int main()
           // incorrect rounding
           double ulp = fabs(val0 - val1);
           double err = double((val1-strtoflt128(inpbuf, 0))/ulp);
+          if (err < expMinErr) {
+            expMinErr = err;
+          }
+          if (err > expMaxErr) {
+            expMaxErr = err;
+          }
           bool prt = false;
           if (err < minErr) {
             minErr = err;
@@ -62,7 +92,8 @@ int main()
         }
       }
     }
-    printf("exp=%6d\n", exp); fflush(stdout);
+    printf("exp=%6d err [%+f..%+f] ULP\n", exp, expMinErr, expMaxErr);
+    fflush(stdout);
   }
   printf("o.k. %d rounding errors out of %d. %.3e percents\n", rnd, tot, 1e2*rnd/tot);
 
