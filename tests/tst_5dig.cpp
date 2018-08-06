@@ -95,7 +95,7 @@ int main(int argz, char** argv)
     printf("exp=%6d err [%+f..%+f] ULP\n", exp, expMinErr, expMaxErr);
     fflush(stdout);
   }
-  printf("o.k. %d rounding errors out of %d. %.3e percents\n", rnd, tot, 1e2*rnd/tot);
+  printf("o.k. %d rounding errors out of %d. %.3e percents. err [%+f..%+f] ULP.\n", rnd, tot, 1e2*rnd/tot, minErr, maxErr);
 
   return 0;
 }
