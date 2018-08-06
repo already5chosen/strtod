@@ -135,54 +135,44 @@ double small_strtod(const char* str, char** endptr)
       // scale uret*2**bine by 10**exp
       const uint64_t MSB = (uint64_t)1 << 63;
       unsigned sexp = exp < 0;
-      unsigned mexp = sexp ? -exp : exp;
-      unsigned cnt1 = mexp / 87; mexp -= cnt1*87;
-      unsigned cnt2 = mexp / 28; mexp -= cnt2*28;
-      unsigned cnt3 = mexp / 3 ; mexp -= cnt3*3;
-      if (mexp != 0 && sexp) {
-        cnt3 += 1;
-        mexp = 3 - mexp;
-      }
-      uint32_t cnts = cnt1 | (cnt2 << 8) | (cnt3 << 16) | (mexp << 24);
-      // printf("exp=%d cnts=%08x uret=%016I64x bine=%d\n", (int)exp, cnts, uret, bine);
+      unsigned mexp = sexp ? 2-exp : exp;
 
       uint32_t lret = 0;
-      static const uint32_t MULx_tab[6][2] = {
-        { 0x82D85E15, 0x2C1796B1 }, // (10**87/2**289 - 1)*2**69
-        { 0x0FCF2864, 0x2BDB2905 }, // (1 - 2**289/10**87)*2**69
-        { 0x25026110, 0x4FCE5E3E }, // (10**28/2**93 - 1)*2**69
-        { 0x9FE6BE4F, 0x4F0941AF }, // (1 - 2**93/10**28)*2**69
-        { 0x00000000, 0xC0000000 }, // (1 - 10**3/2**10)*2**69
-        { 0x53F7CEDA, 0xC49BA5E3 }, // (2**10/10**3 - 1)*2**69
+      typedef struct {
+        uint8_t  decExp;
+        int16_t  binExp;
+        uint32_t MULx_L;
+        uint32_t MULx_H;
+      } dec_scale_tab_entry_t;
+      static const dec_scale_tab_entry_t DecScaleTab[2][3] = {
+        { // scale up
+          {87, 289, 0x82D85E15, 0x2C1796B1 }, // (10**87/2**289 - 1)*2**69
+          {28,  93, 0x25026110, 0x4FCE5E3E }, // (10**28/2**93  - 1)*2**69
+          {28,                             }, // dummy
+        },
+        { // scale down
+          {90,-299, 0x1CDE0BE4, 0x97B30932 }, // (2**299/10**90 - 1)*2**69
+          {31,-103, 0xD0FF3D21, 0x73ACCB12 }, // (2**103/10**31 - 1)*2**69
+          { 3, -10, 0x53F7CEDA, 0xC49BA5E3 }, // (2**10/10**3 -   1)*2**69
+        },
       };
-      static const uint8_t sub_tab[3]  = { 0, 0, 1};
-      static const int16_t dBin_tab[6] = { 289, -289, 93, -93, 10, -10};
-      for (int factor_i = 0; factor_i < 3; ++factor_i, cnts >>= 8) {
+      const dec_scale_tab_entry_t* pTab = &DecScaleTab[sexp][0];
+      for (int factor_i = 0; factor_i < 3; ++factor_i, ++pTab) {
         // multiply by 10**N, where N= +/- 87, 28, 3
-        unsigned idx = factor_i*2 + sexp;
-        const uint32_t MULx_L = MULx_tab[idx][0];
-        const uint32_t MULx_H = MULx_tab[idx][1];
-        const int      dBin = dBin_tab[idx];
-        const unsigned sub  = sub_tab[factor_i] ^ sexp;
-        for (unsigned nIt = cnts & 255; nIt != 0; --nIt) {
-          uint32_t w2 = (uint32_t)(uret >> 32);
-          uint32_t w1 = (uint32_t)uret;
-          uint64_t delta =
-               ((uint64_t)w2 * MULx_H)
-            + (((uint64_t)w2 * MULx_L) >> 32)
-            + (((uint64_t)w1 * MULx_H) >> 32);
-          uint64_t delta_h = delta >> 5;
-          uint32_t delta_l = (uint32_t)delta << 27;
-          if (sub) {
-            uret -= delta_h;
-            uret -= (delta_l > lret);
-            lret -= delta_l;
-            if ((uret & MSB)==0) { // underflow
-              bine -= 1;
-              uret += uret + (lret >> 31);
-              lret += lret;
-            }
-          } else {
+        const unsigned decExp = pTab->decExp;
+        if (mexp >= decExp) {
+          const uint32_t MULx_L = pTab->MULx_L;
+          const uint32_t MULx_H = pTab->MULx_H;
+          const int      binExp = pTab->binExp;
+          do {
+            uint32_t w2 = (uint32_t)(uret >> 32);
+            uint32_t w1 = (uint32_t)uret;
+            uint64_t delta =
+                 ((uint64_t)w2 * MULx_H)
+              + (((uint64_t)w2 * MULx_L) >> 32)
+              + (((uint64_t)w1 * MULx_H) >> 32);
+            uint64_t delta_h = delta >> 5;
+            uint32_t delta_l = (uint32_t)delta << 27;
             uret += delta_h;
             lret += delta_l;
             uret += (delta_l > lret);
@@ -191,13 +181,13 @@ double small_strtod(const char* str, char** endptr)
               lret = (lret >> 1) | ((uret & 1) << 31);
               uret = (uret >> 1) | MSB;
             }
-          }
-          bine += dBin;
+            bine += binExp;
+            mexp -= decExp;
+          } while (mexp >= decExp);
         }
       }
-      // printf("exp=%d cnts=%08x uret=%016I64x bine=%d\n", (int)exp, cnts, uret, bine);
 
-      for (unsigned nIt = cnts; nIt != 0; --nIt) {
+      for (unsigned nIt = sexp ? 2-mexp : mexp; nIt != 0; --nIt) {
         // multiply by 10
         uint64_t uinc = (uret >> 2);
         uint32_t linc = (lret >> 2) | ((uret & 3) << 30);
@@ -211,7 +201,6 @@ double small_strtod(const char* str, char** endptr)
           uret = (uret >> 1) | MSB;
         }
       }
-      // printf("exp=%d cnts=%08x uret=%016I64x bine=%d\n", (int)exp, cnts, uret, bine);
 
       uret |= (lret >> 31);
     }
