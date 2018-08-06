@@ -146,62 +146,53 @@ double small_strtod(const char* str, char** endptr)
       } dec_scale_tab_entry_t;
       static const dec_scale_tab_entry_t DecScaleTab[2][3] = {
         { // scale up
-          {87, 289, 0x82D85E15, 0x2C1796B1 }, // (10**87/2**289 - 1)*2**69
-          {28,  93, 0x25026110, 0x4FCE5E3E }, // (10**28/2**93  - 1)*2**69
-          {28,                             }, // dummy
+          {56, 186, 0x0F6A24FE, 0x140C7894 }, // (10**56/2**186 - 1)*2**66
+          { 7,  23, 0x00000000, 0xC4B40000 }, // (10**7/2**23   - 1)*2**66
+          { 1,   3, 0xFFFFFFFF, 0xFFFFFFFF }, // (10**0/2**3    - 1)*2**66
         },
         { // scale down
-          {90,-299, 0x1CDE0BE4, 0x97B30932 }, // (2**299/10**90 - 1)*2**69
-          {31,-103, 0xD0FF3D21, 0x73ACCB12 }, // (2**103/10**31 - 1)*2**69
-          { 3, -10, 0x53F7CEDA, 0xC49BA5E3 }, // (2**10/10**3 -   1)*2**69
+          {49,-163, 0x3CC4D56F, 0xAD431BB1 }, // (2**163/10**49 - 1)*2**66
+          { 6, -20, 0x7B634DAD, 0x31BDE82D }, // (2**20/10**6   - 1)*2**66
+          { 3, -10, 0x6A7EF9DB, 0x189374BC }, // (2**10/10**3 -   1)*2**66
         },
       };
-      const dec_scale_tab_entry_t* pTab = &DecScaleTab[sexp][0];
-      for (int factor_i = 0; factor_i < 3; ++factor_i, ++pTab) {
-        // multiply by 10**N, where N= +/- 87, 28, 3
-        const unsigned decExp = pTab->decExp;
-        if (mexp >= decExp) {
-          const uint32_t MULx_L = pTab->MULx_L;
-          const uint32_t MULx_H = pTab->MULx_H;
-          const int      binExp = pTab->binExp;
-          do {
-            uint32_t w2 = (uint32_t)(uret >> 32);
-            uint32_t w1 = (uint32_t)uret;
-            uint64_t delta =
-                 ((uint64_t)w2 * MULx_H)
-              + (((uint64_t)w2 * MULx_L) >> 32)
-              + (((uint64_t)w1 * MULx_H) >> 32);
-            uint64_t delta_h = delta >> 5;
-            uint32_t delta_l = (uint32_t)delta << 27;
-            uret += delta_h;
-            lret += delta_l;
-            uret += (delta_l > lret);
-            if ((uret & MSB)==0) { // overflow
-              bine += 1;
-              lret = (lret >> 1) | ((uret & 1) << 31);
-              uret = (uret >> 1) | MSB;
-            }
-            bine += binExp;
-            mexp -= decExp;
-          } while (mexp >= decExp);
+      for (;;) {
+        const dec_scale_tab_entry_t* pTab = &DecScaleTab[sexp][0];
+        for (int factor_i = 0; factor_i < 3; ++factor_i, ++pTab) {
+          // multiply by 10**N, where N= -49, -6, -3, 7, 56
+          const unsigned decExp = pTab->decExp;
+          if (mexp >= decExp) {
+            const uint32_t MULx_L = pTab->MULx_L;
+            const uint32_t MULx_H = pTab->MULx_H;
+            const int      binExp = pTab->binExp;
+            do {
+              uint32_t w2 = (uint32_t)(uret >> 32);
+              uint32_t w1 = (uint32_t)uret;
+              uint64_t delta =
+                   ((uint64_t)w2 * MULx_H)
+                + 1
+                + (((uint64_t)w2 * MULx_L) >> 32)
+                + (((uint64_t)w1 * MULx_H) >> 32);
+              uint64_t delta_h = delta >> 2;
+              uint32_t delta_l = (uint32_t)delta << 30;
+              uret += delta_h;
+              lret += delta_l;
+              uret += (delta_l > lret);
+              if ((uret & MSB)==0) { // overflow
+                bine += 1;
+                lret = (lret >> 1) | ((uret & 1) << 31);
+                uret = (uret >> 1) | MSB;
+              }
+              bine += binExp;
+              mexp -= decExp;
+            } while (mexp >= decExp);
+          }
         }
+        if (!sexp)
+          break;
+        mexp = 2 - mexp;
+        sexp = 0;
       }
-
-      for (unsigned nIt = sexp ? 2-mexp : mexp; nIt != 0; --nIt) {
-        // multiply by 10
-        uint64_t uinc = (uret >> 2);
-        uint32_t linc = (lret >> 2) | ((uret & 3) << 30);
-        lret += linc;
-        uret += (lret < linc);
-        uret += uinc;
-        bine += 3;
-        if ((uret & MSB)==0) { // overflow
-          bine += 1;
-          lret = (lret >> 1) | ((uret & 1) << 31);
-          uret = (uret >> 1) | MSB;
-        }
-      }
-
       uret |= (lret >> 31);
     }
     uret = to_double(uret | sticky, bine);
