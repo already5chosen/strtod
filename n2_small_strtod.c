@@ -1,4 +1,3 @@
-#include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -40,28 +39,54 @@ static uint64_t to_double(uint64_t mant, int exp)
   if (exp >= 2047)
     return (uint64_t)2047 << 52; // Inf
 
+  unsigned nIntBits = 53; // normal range
   if (exp < 1) {
     if (exp < -52)
       return 0;
 
     // subnormal
-    unsigned nFractBits = 12 - exp;
-    uint64_t FractMSB = (uint64_t)1 << (nFractBits-1);
-    uint64_t FractMsk = (uint64_t)-1 >> (64-nFractBits);
-    uint64_t fract = mant & FractMsk;
-    uint64_t ret  = (mant >> 1) >> (nFractBits-1);
-    fract |= (ret & 1); // to nearest even
-    ret += (fract > FractMSB);
-    return ret;
+    nIntBits = 52 + exp;
+    exp = 0;
   }
 
-  // normal range
-  mant += mant; // remove MS bit
-  uint64_t ret = ((uint64_t)exp << 52) + (mant >> 12);
-  unsigned rem = mant & ((1u<<12)-1);
-  rem |= (ret & 1); // to nearest even
-  ret += (rem > (1u<<11));
+  const uint64_t MANT_MASK = (uint64_t)-1 >> 12;
+  const uint64_t BIT63     = (uint64_t)1  << 63;
+  uint64_t fract = mant << nIntBits; // shift fractional part into MS bits
+  uint64_t ret   = ((mant >> 1) >> (63-nIntBits)) & MANT_MASK;
+  fract |= (ret & 1); // tie breaks to nearest even
+  ret |= ((uint64_t)(unsigned)exp << 52);
+  ret += (fract > BIT63);
   return ret;
+}
+
+// on input *pw2 > 0
+// return # of leading zeros
+static int normailize96(uint32_t* pw2, uint32_t* pw1, uint32_t* pw0)
+{
+  uint32_t w0 = *pw0;
+  uint32_t w1 = *pw1;
+  uint32_t w2 = *pw2;
+#if 1
+  const uint32_t MSB = (uint32_t)1 << 31;
+  int lz = 0;
+  while (w2 < MSB) {
+    w2 += w2 + (w1>>31);
+    w1 += w1 + (w0>>31);
+    w0 += w0;
+    ++lz;
+  }
+#else
+  int lz = __builtin_clz(w2);
+  if (lz) {
+    w2 = (w2 << lz) | (w1 >> (32-lz));
+    w1 = (w1 << lz) | (w0 >> (32-lz));
+    w0 = (w0 << lz);
+  }
+#endif
+  *pw2 = w2;
+  *pw1 = w1;
+  *pw0 = w0;
+  return lz;
 }
 
 double small_strtod(const char* str, char** endptr)
@@ -127,75 +152,82 @@ double small_strtod(const char* str, char** endptr)
       goto done;
     }
 
-    // normalize mantissa
-    int lz = __builtin_clzll(mant);
-    uret = mant << lz;
-    int bine = 63-lz;
-    if (exp != 0) {
-      // scale uret*2**bine by 10**exp
-      const uint64_t MSB = (uint64_t)1 << 63;
-      unsigned sexp = exp < 0;
-      unsigned mexp = sexp ? 2-exp : exp;
+    uint32_t w2 = (uint32_t)(mant >> 32);
+    uint32_t w1 = (uint32_t)mant;
+    uint32_t w0 = 0;
+    int bine = 63;
+    if (w2 == 0) {
+      w2   = w1;
+      w1   = 0;
+      bine = 63 - 32;
+    }
+    unsigned sexp = exp < 0;
+    unsigned mexp = sexp ? -exp : exp;
+    for (;;) {
+      // normalize mantissa
+      bine -= normailize96(&w2, &w1, &w0);
 
-      uint32_t lret = 0;
+      if (mexp == 0)
+        break;
+
+      // scale w2:w1:w0 * 2**bine by 10**exp
       typedef struct {
+        uint32_t MULx_H;
+        uint32_t MULx_M;
+        uint8_t  MULx_L;
         uint8_t  decExp;
         int16_t  binExp;
-        uint32_t MULx_L;
-        uint32_t MULx_H;
       } dec_scale_tab_entry_t;
       static const dec_scale_tab_entry_t DecScaleTab[2][3] = {
         { // scale up
-          {56, 186, 0x0F6A24FE, 0x140C7894 }, // (10**56/2**186 - 1)*2**66
-          { 7,  23, 0x00000000, 0xC4B40000 }, // (10**7/2**23   - 1)*2**66
-          { 1,   3, 0xFFFFFFFF, 0xFFFFFFFF }, // (10**0/2**3    - 1)*2**66
+          { 0xFC6F7C40, 0x45812296, 0x4D, 31, 103,}, // (10**31/2**103)*2**72
+          { 0xFA000000, 0x00000000, 0x00,  3,  10,}, // (10**3 /2**10 )*2**72
+          { 0xA0000000, 0x00000000, 0x00,  1,   4,}, // (10**0 /2**4  )*2**72
         },
         { // scale down
-          {59,-196, 0xF9F5F88F, 0x0470BAAA }, // (2**196/10**59 - 1)*2**66
-          {12, -40, 0x7A844660, 0x65E6604B }, // (2**40/10**12  - 1)*2**66
-          { 3, -10, 0x6A7EF9DB, 0x189374BC }, // (2**10/10**3 -   1)*2**66
+          { 0xE45C10C4, 0x2A2B3B05, 0x8D, 44,-146,}, // (2**146/10**44)*2**72
+          { 0xD6BF94D5, 0xE57A42BC, 0x3D,  7, -23,}, // (2**23 /10**7 )*2**72
+          { 0xCCCCCCCC, 0xCCCCCCCC, 0xCD,  1,  -3,}, // (2**3  /10**1 )*2**72
         },
       };
-      for (;;) {
-        const dec_scale_tab_entry_t* pTab = &DecScaleTab[sexp][0];
-        for (int factor_i = 0; factor_i < 3; ++factor_i, ++pTab) {
-          // multiply by 10**N, where N= -49, -6, -3, 7, 56
-          const unsigned decExp = pTab->decExp;
-          if (mexp >= decExp) {
-            const uint32_t MULx_L = pTab->MULx_L;
-            const uint32_t MULx_H = pTab->MULx_H;
-            const int      binExp = pTab->binExp;
-            do {
-              uint32_t w2 = (uint32_t)(uret >> 32);
-              uint32_t w1 = (uint32_t)uret;
-              uint64_t delta =
-                   ((uint64_t)w2 * MULx_H)
-                + 1
-                + (((uint64_t)w2 * MULx_L) >> 32)
-                + (((uint64_t)w1 * MULx_H) >> 32);
-              uint64_t delta_h = delta >> 2;
-              uint32_t delta_l = (uint32_t)delta << 30;
-              uret += delta_h;
-              lret += delta_l;
-              uret += (delta_l > lret);
-              if ((uret & MSB)==0) { // overflow
-                bine += 1;
-                lret = (lret >> 1) | ((uret & 1) << 31);
-                uret = (uret >> 1) | MSB;
-              }
-              bine += binExp;
-              mexp -= decExp;
-            } while (mexp >= decExp);
-          }
-        }
-        if (!sexp)
-          break;
-        mexp = 2 - mexp;
-        sexp = 0;
-      }
-      uret |= (lret >> 31);
+      const dec_scale_tab_entry_t* pTab = &DecScaleTab[sexp][0];
+      unsigned decExp;
+      while ((decExp=pTab->decExp) > mexp)
+        ++pTab;
+
+      const uint32_t MULx_L = pTab->MULx_L;
+      const uint32_t MULx_M = pTab->MULx_M;
+      const uint32_t MULx_H = pTab->MULx_H;
+      const int      binExp = pTab->binExp;
+      do {
+        // multiply by 10**N, where N= (-44, -7, -1, 1, 3, 31)
+        // w2*mh
+        //    w2*mm
+        //       w2*ml
+        //    w1*mh
+        //       w1*mm
+        //       w0*mh
+        uint64_t w2w1 =
+              ( (uint64_t)w2 * MULx_H)
+            + (((uint64_t)w2 * MULx_M) >> 32)
+            + (((uint64_t)w1 * MULx_H) >> 32);
+        uint64_t w1w0 =
+            + (((uint64_t)w0   * MULx_H) >> 32)
+            + (           w1   * MULx_H)
+            + (((uint64_t)w1   * MULx_M) >> 32)
+            + (           w2   * MULx_M)
+            + (      (w2>>8)   * MULx_L);
+        w2w1 += (uint32_t)(w1w0 >> 32);
+        w0  = (uint32_t)w1w0;
+        w1  = (uint32_t)w2w1;
+        w2  = (uint32_t)(w2w1 >> 32);
+        bine += binExp;
+        mexp -= decExp;
+      } while (mexp >= decExp);
     }
-    uret = to_double(uret | sticky, bine);
+    w1 |= (w0 != 0);
+    w1 |= sticky;
+    uret = to_double(((uint64_t)w2 << 32) | w1, bine);
   }
 
   done:
