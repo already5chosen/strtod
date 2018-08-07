@@ -39,23 +39,28 @@ static uint64_t to_double(uint64_t mant, int exp)
   if (exp >= 2047)
     return (uint64_t)2047 << 52; // Inf
 
-  unsigned nIntBits = 53; // normal range
   if (exp < 1) {
     if (exp < -52)
       return 0;
 
     // subnormal
-    nIntBits = 52 + exp;
+    do {
+      // shift mantisa to the right while folding together LS bits
+      mant = (mant >> 1) | (mant & 1);
+      ++exp;
+    } while (exp <= 0);
     exp = 0;
   }
 
-  const uint64_t MANT_MASK = (uint64_t)-1 >> 12;
-  const uint64_t BIT63     = (uint64_t)1  << 63;
-  uint64_t fract = mant << nIntBits; // shift fractional part into MS bits
-  uint64_t ret   = ((mant >> 1) >> (63-nIntBits)) & MANT_MASK;
-  fract |= (ret & 1); // tie breaks to nearest even
-  ret |= ((uint64_t)(unsigned)exp << 52);
-  ret += (fract > BIT63);
+  const uint64_t MANT_MASK = (uint64_t)-1 >> 1;  // 63 LS bits
+  const uint32_t REM_MSB   = 1u << 10;
+  const uint32_t REM_MASK  = REM_MSB*2-1;        // 11 LS bits
+
+  unsigned rem = mant & REM_MASK;
+  uint64_t ret = (mant & MANT_MASK) >> 11; // remove MS bit and shift mantisa to lS bits
+  rem |= (ret & 1); // tie breaks to nearest even
+  ret |= ((uint64_t)exp << 52);
+  ret += (rem > REM_MSB);
   return ret;
 }
 
