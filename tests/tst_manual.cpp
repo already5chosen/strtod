@@ -22,8 +22,8 @@ static void body(char* str)
   char diff1_buf[100]={0};
   if (val0 != val1) {
     double ulp = fabs(nextafter(val1, val0)-val1);
-    snprintf(diff0_buf, sizeof(diff0_buf), " %+f ULP", double((val0-val_ref)/ulp));
-    snprintf(diff1_buf, sizeof(diff1_buf), " %+f ULP", double((val1-val_ref)/ulp));
+    snprintf(diff0_buf, sizeof(diff0_buf), " %+.10f ULP", double((val0-val_ref)/ulp));
+    snprintf(diff1_buf, sizeof(diff1_buf), " %+.10f ULP", double((val1-val_ref)/ulp));
   }
   printf(
    "strtoflt128  : %29.21e %d '%s'\n"

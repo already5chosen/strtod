@@ -3,22 +3,40 @@
 #include <cstdint>
 #include <cstring>
 #include <cmath>
+#include <cfloat>
 #include <quadmath.h>
 
 extern "C" double small_strtod(const char* str, char** endptr);
 
 int main(int argz, char** argv)
 {
-  int mant0 = 0;
   int minExp = -323;
   int maxExp =  309;
   int nIntArgs = 0;
+  int nDig = 25;
+  bool exactNdig = false;
   for (int arg_i = 1; arg_i < argz; ++arg_i) {
     char* arg = argv[arg_i];
-    if (strcmp(arg, "-u")== 0) {
-      mant0 = 10000;
+    char* endp;
+    if (strcmp(arg, "-e")== 0) {
+      exactNdig = true;
+    } else if (arg[0]=='-' && arg[1]!=0 && arg[2]=='=') {
+      int val = strtol(&arg[3], &endp, 0);
+      if (endp != &arg[3]) {
+        switch (arg[1]) {
+          case 'd':
+            if (val < 6 || val > 25) {
+              fprintf(stderr, "Number of digit %d out of range [6..25]\n", val);
+              return 1;
+            }
+            nDig = val;
+            break;
+          default:
+            fprintf(stderr, "Unknown option '%s'\n", arg);
+            return 1;
+        }
+      }
     } else {
-      char* endp;
       int val = strtol(arg, &endp, 0);
       if (endp != arg) {
         if (nIntArgs < 2) {
@@ -31,6 +49,11 @@ int main(int argz, char** argv)
     }
   }
 
+  int ndigMin   = exactNdig ? nDig : 1;
+  const uint32_t incrFactor = uint32_t(round(ldexp(pow(10, (nDig-ndigMin+1)*1e-5)-1, 32)));
+  const double mant0 = floor(nextafter(pow(10, ndigMin-1), DBL_MAX));
+  printf("Running test with %d to %d digits. incrFactor=%u.\n", ndigMin, nDig, incrFactor);
+
   double minErr = 0;
   double maxErr = 0;
   int tot = 0;
@@ -39,9 +62,17 @@ int main(int argz, char** argv)
   for (int exp = minExp; exp <= maxExp; ++exp) {
     double expMinErr = 0;
     double expMaxErr = 0;
-    for (int mant = mant0; mant < 100000; ++mant) {
+    unsigned __int128 scaledMant = mant0 * (1 << 20);
+    const uint64_t splitFactor = 1E12;
+    for (int mant_i = 0; mant_i < 100000; ++mant_i) {
+      unsigned __int128 mant = scaledMant >> 20;
+      uint64_t mant_h = mant / splitFactor;
+      uint64_t mant_l = mant % splitFactor;
       char inpbuf[80];
-      sprintf(inpbuf, ".%de%d", mant, exp);
+      if (mant_h != 0)
+        sprintf(inpbuf, ".%llu%012llue%d", mant_h, mant_l, exp);
+      else
+        sprintf(inpbuf, ".%llue%d", mant_l, exp);
       char* endp0;
       double val0 = strtod(inpbuf, &endp0);
       char* endp1;
@@ -91,7 +122,10 @@ int main(int argz, char** argv)
           ++rnd;
         }
       }
+
+      scaledMant += (scaledMant*incrFactor) >> 32;
     }
+    // printf("%e\n", double(scaledMant >> 20));
     printf("exp=%6d err [%- 13.*f..%c%-12.*f] ULP\n"
       , exp
       , expMinErr==0 ? 0 : 10, expMinErr
