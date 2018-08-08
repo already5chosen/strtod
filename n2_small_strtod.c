@@ -71,7 +71,9 @@ static int normailize96(uint32_t* pw2, uint32_t* pw1, uint32_t* pw0)
   return lz;
 }
 
-double small_strtod(const char* str, char** endptr)
+double 
+__attribute ((cold))
+small_strtod(const char* str, char** endptr)
 {
   const char* p = skipWhiteSpaces(str);
   int neg = 0;
