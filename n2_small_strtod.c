@@ -1,29 +1,6 @@
+// #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
-
-// return # of digits
-static ptrdiff_t readDecimalDigits(const char* src, uint64_t* pVal, uint64_t maxVal, ptrdiff_t* pnUsed, int* sticky)
-{
-  uint64_t val = *pVal;
-  ptrdiff_t nd, nUsed = 0;
-  unsigned lsb = 0;
-  for (nd = 0; ; ++nd) {
-    unsigned c = src[nd];
-    unsigned dig = c - '0';
-    if (dig > 9)
-      break;
-    if (val <= maxVal) {
-      val = val*10+dig;
-      ++nUsed;
-    } else {
-      lsb |= dig;
-    }
-  }
-  *pVal = val;
-  *sticky |= (lsb != 0); // for tie breaker
-  *pnUsed = nUsed;
-  return nd;
-}
 
 static const char *skipWhiteSpaces(const char *str)
 { // skip leading white spaces
@@ -104,47 +81,77 @@ double small_strtod(const char* str, char** endptr)
     default:                break;
   }
 
-  uint64_t mant = 0;
-  int sticky=0;
-  ptrdiff_t nUsedInt;
-  ptrdiff_t ni = readDecimalDigits(p, &mant, (UINT64_MAX-9)/10,  &nUsedInt, &sticky);
-
-  ptrdiff_t nf = 0;
-  ptrdiff_t nUsedFract = 0;
-  if (p[ni]=='.')
-    nf = readDecimalDigits(&p[ni+1], &mant, (UINT64_MAX-9)/10, &nUsedFract, &sticky);
-
-  uint64_t uret = 0;
   const char* endptrval = str;
-  if (ni == 0 && nf == 0) {  // conversion failed
-    neg = 0;
-    goto done;
-  }
-
-  ptrdiff_t exp = ni - nUsedInt - nUsedFract;
-  ptrdiff_t nm  = ni + nf + (p[ni]=='.');
-  endptrval = &p[nm];
+  enum { PARSE_INT, PARSE_FRACT, PARSE_EXP };
+  int parseState = PARSE_INT;
+  uint64_t  rdVal = 0;
+  ptrdiff_t nUsed = 0, nd = 0, succ = 0, exp = 0;
+  uint64_t  maxVal = (UINT64_MAX-9)/10;
+  int lsbits = 0;
+  uint64_t uret = 0;
+  uint64_t mant;
+  int sticky;
+  int nege;
   const int MAX_EXP =  310;
   const int MIN_EXP = -345;
-  if (endptrval[0] == 'e' || endptrval[0] == 'E') {
-    p = endptrval + 1;
-    int nege = 0;
-    switch (p[0]) {
-      case '+': ++p;           break;
-      case '-': ++p; nege = 1; break;
-      default:                 break;
-    }
-
-    uint64_t absExpVal = 0;
-    ptrdiff_t dummy1;
-    int dummy2;
-    ptrdiff_t ne = readDecimalDigits(p, &absExpVal,
-      nege == 0 ? (uint64_t)MAX_EXP - exp : (uint64_t)-MIN_EXP + exp,
-      &dummy1, &dummy2);
-    if (ne != 0) {
-      // exponent present
-      endptrval = p + ne;
-      exp = nege==0 ? exp + absExpVal : exp - absExpVal;
+  for (;;) {
+    unsigned c = *p++;
+    unsigned dig = c - '0';
+    if (dig <= 9) {
+      ++nd;
+      if (rdVal <= maxVal) {
+        rdVal =
+          rdVal*10+dig;
+        ++nUsed;
+      } else {
+        lsbits |= dig;
+      }
+    } else {
+      // non-digit
+      if (parseState != PARSE_EXP) {
+        mant    = rdVal;
+        sticky  = (lsbits != 0);
+        exp    -= nUsed;
+        succ   += nd;
+        ptrdiff_t ni = nd;
+        nUsed = nd = 0;
+        if (parseState == PARSE_INT) {
+          exp += ni;
+          if (c == '.') {
+            parseState = PARSE_FRACT;
+            continue;
+          }
+        }
+        // end of mantissa
+        if (succ == 0) {  // conversion failed
+          neg = 0;
+          goto done;
+        }
+        // conversion succeed
+        endptrval = p - 1;
+        if (c == 'e' || c == 'E') {
+          nege = 0;
+          switch (p[0]) {
+            case '+': ++p;           break;
+            case '-': ++p; nege = 1; break;
+            default:                 break;
+          }
+          rdVal = 0;
+          maxVal = (nege == 0) ?
+            (uint64_t) MAX_EXP - exp :
+            (uint64_t)-MIN_EXP + exp ;
+          parseState = PARSE_EXP;
+          continue;
+        }
+      } else {
+        // parseState == PARSE_EXP
+        if (nd != 0) {
+          // exponent present
+          endptrval = p - 1;
+          exp = nege==0 ? exp + rdVal : exp - rdVal;
+        }
+      }
+      break;
     }
   }
 
@@ -216,21 +223,21 @@ double small_strtod(const char* str, char** endptr)
               ( (uint64_t)w2 * MULx_H)
             + (((uint64_t)w2 * MULx_M) >> 32)
             + (((uint64_t)w1 * MULx_H) >> 32);
-        uint64_t w1w0 =
-            + (((uint64_t)w0   * MULx_H) >> 32)
-            + (           w1   * MULx_H)
-            + (((uint64_t)w1   * MULx_M) >> 32)
-            + (           w2   * MULx_M)
-            + (      (w2>>8)   * MULx_L);
-        w2w1 += (uint32_t)(w1w0 >> 32);
-        w0  = (uint32_t)w1w0;
+        w0 =  (w0 >> 18) * (MULx_H >> 17)
+            +((w1        *  MULx_H) >> 3)
+            +((w2        *  MULx_M) >> 3)
+            + (w1 >> 18) * (MULx_M >> 17)
+            + (w2 >> 11) *  MULx_L;
+        w2w1 += (w0 >> 29);
+        w0  = w0 << 3;
         w1  = (uint32_t)w2w1;
         w2  = (uint32_t)(w2w1 >> 32);
         bine += binExp;
         mexp -= decExp;
       } while (mexp >= decExp);
     }
-    w1 |= (w0 != 0);
+    // printf("%08x:%08x:%08x\n", w2, w1, w0);
+    w1 |= ((w0>>22) != 0); // approximately 9-10 MS bits of w0 are good. The rest is garbage
     w1 |= sticky;
     uret = to_double(((uint64_t)w2 << 32) | w1, bine);
   }
