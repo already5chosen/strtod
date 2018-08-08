@@ -84,12 +84,12 @@ small_strtod(const char* str, char** endptr)
   }
 
   const char* endptrval = str;
-  enum { PARSE_INT, PARSE_FRACT, PARSE_EXP };
+  enum { PARSE_FRACT, PARSE_INT = 1, PARSE_EXP };
   int parseState = PARSE_INT;
   uint64_t  rdVal = 0;
-  ptrdiff_t nUsed = 0, nd = 0, succ = 0, exp = 0;
+  ptrdiff_t rdExp = 0, exp;
   uint64_t  maxVal = (UINT64_MAX-9)/10;
-  int lsbits = 0;
+  int lsbits = 0, succ = 0;
   uint64_t uret = 0;
   uint64_t mant;
   int sticky;
@@ -100,25 +100,19 @@ small_strtod(const char* str, char** endptr)
     unsigned c = *p++;
     unsigned dig = c - '0';
     if (dig <= 9) {
-      ++nd;
+      succ = 1;
+      rdExp += parseState;
       if (rdVal <= maxVal) {
         rdVal =
           rdVal*10+dig;
-        ++nUsed;
+        --rdExp;
       } else {
         lsbits |= dig;
       }
     } else {
       // non-digit
       if (parseState != PARSE_EXP) {
-        mant    = rdVal;
-        sticky  = (lsbits != 0);
-        exp    -= nUsed;
-        succ   += nd;
-        ptrdiff_t ni = nd;
-        nUsed = nd = 0;
         if (parseState == PARSE_INT) {
-          exp += ni;
           if (c == '.') {
             parseState = PARSE_FRACT;
             continue;
@@ -130,6 +124,9 @@ small_strtod(const char* str, char** endptr)
           goto done;
         }
         // conversion succeed
+        exp     = rdExp;
+        mant    = rdVal;
+        sticky  = (lsbits != 0);
         endptrval = p - 1;
         if (c == 'e' || c == 'E') {
           nege = 0;
@@ -138,6 +135,7 @@ small_strtod(const char* str, char** endptr)
             case '-': ++p; nege = 1; break;
             default:                 break;
           }
+          succ  = 0;
           rdVal = 0;
           maxVal = (nege == 0) ?
             (uint64_t) MAX_EXP - exp :
@@ -147,7 +145,7 @@ small_strtod(const char* str, char** endptr)
         }
       } else {
         // parseState == PARSE_EXP
-        if (nd != 0) {
+        if (succ != 0) {
           // exponent present
           endptrval = p - 1;
           exp = nege==0 ? exp + rdVal : exp - rdVal;
