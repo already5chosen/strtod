@@ -1,12 +1,15 @@
 CC = g++ -std=c++11 -O2 -Wall
 cc = gcc -std=c99   -O2 -Wall
 
-all: tstm tst5d tst25d n2_tstm n2_tst5d n2_tst25d
+all: tstm tst5d tst25d n2_tstm n2_tst5d n2_tst25d 64b_tstm 64b_tst5d 64b_tst25d
 
 small_strtod.o: ../small_strtod.c
 	${cc} -c $< -o  $@
 
 n2_small_strtod.o: ../n2_small_strtod.c
+	${cc} -c $< -o  $@
+
+64b_small_strtod.o: ../64b_small_strtod.c
 	${cc} -c $< -o  $@
 
 tst_manual.o: tst_manual.cpp
@@ -34,4 +37,13 @@ n2_tst5d: tst_5dig.o n2_small_strtod.o
 	${CC} $+ -lquadmath -o $@
 
 n2_tst25d: tst_25dig.o n2_small_strtod.o
+	${CC} $+ -lquadmath -o $@
+
+64b_tstm: tst_manual.o 64b_small_strtod.o
+	${CC} $+ -lquadmath -o $@
+
+64b_tst5d: tst_5dig.o 64b_small_strtod.o
+	${CC} $+ -lquadmath -o $@
+
+64b_tst25d: tst_25dig.o 64b_small_strtod.o
 	${CC} $+ -lquadmath -o $@
