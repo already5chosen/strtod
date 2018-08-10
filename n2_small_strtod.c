@@ -71,8 +71,8 @@ static int normailize96(uint32_t* pw2, uint32_t* pw1, uint32_t* pw0)
   return lz;
 }
 
-double 
-__attribute ((cold))
+double
+__attribute__ ((cold))
 small_strtod(const char* str, char** endptr)
 {
   const char* p = skipWhiteSpaces(str);
@@ -137,9 +137,10 @@ small_strtod(const char* str, char** endptr)
           }
           succ  = 0;
           rdVal = 0;
-          maxVal = (nege == 0) ?
+          ptrdiff_t aMaxVal = (nege == 0) ?
             (uint64_t) MAX_EXP - exp :
             (uint64_t)-MIN_EXP + exp ;
+          maxVal = aMaxVal < 0 ? 0 : aMaxVal;
           parseState = PARSE_EXP;
           continue;
         }
