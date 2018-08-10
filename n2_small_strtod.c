@@ -89,7 +89,7 @@ small_strtod(const char* str, char** endptr)
   uint64_t  rdVal = 0;
   ptrdiff_t rdExp = 0, exp;
   uint64_t  maxVal = (UINT64_MAX-9)/10;
-  int lsbits = 0, succ = 0;
+  int lsbits = 0;
   uint64_t uret = 0;
   uint64_t mant;
   int sticky;
@@ -100,7 +100,7 @@ small_strtod(const char* str, char** endptr)
     unsigned c = *p++;
     unsigned dig = c - '0';
     if (dig <= 9) {
-      succ = 1;
+      endptrval = p;
       rdExp += parseState;
       if (rdVal <= maxVal) {
         rdVal =
@@ -114,12 +114,15 @@ small_strtod(const char* str, char** endptr)
       if (parseState != PARSE_EXP) {
         if (parseState == PARSE_INT) {
           if (c == '.') {
+            // decimal point
+            if (endptrval != str) // there were digits before decimal point
+              endptrval = p;
             parseState = PARSE_FRACT;
             continue;
           }
         }
         // end of mantissa
-        if (succ == 0) {  // conversion failed
+        if (endptrval == str) {  // conversion failed
           neg = 0;
           goto done;
         }
@@ -127,15 +130,14 @@ small_strtod(const char* str, char** endptr)
         exp     = rdExp;
         mant    = rdVal;
         sticky  = (lsbits != 0);
-        endptrval = p - 1;
         if (c == 'e' || c == 'E') {
+          // possibly, exponent present
           nege = 0;
           switch (p[0]) {
             case '+': ++p;           break;
             case '-': ++p; nege = 1; break;
             default:                 break;
           }
-          succ  = 0;
           rdVal = 0;
           ptrdiff_t aMaxVal = (nege == 0) ?
             (uint64_t) MAX_EXP - exp :
@@ -146,11 +148,7 @@ small_strtod(const char* str, char** endptr)
         }
       } else {
         // parseState == PARSE_EXP
-        if (succ != 0) {
-          // exponent present
-          endptrval = p - 1;
-          exp = nege==0 ? exp + rdVal : exp - rdVal;
-        }
+        exp = nege==0 ? exp + rdVal : exp - rdVal;
       }
       break;
     }
