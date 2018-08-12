@@ -139,9 +139,7 @@ small_strtod(const char* str, char** endptr)
             default:                 break;
           }
           rdVal = 0;
-          ptrdiff_t aMaxVal = (nege == 0) ?
-            (uint64_t) MAX_EXP - exp :
-            (uint64_t)-MIN_EXP + exp ;
+          ptrdiff_t aMaxVal = (nege == 0) ? MAX_EXP - exp : -MIN_EXP + exp ;
           maxVal = aMaxVal < 0 ? 0 : aMaxVal;
           parseState = PARSE_EXP;
           continue;
