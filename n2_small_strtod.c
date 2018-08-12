@@ -77,17 +77,15 @@ small_strtod(const char* str, char** endptr)
 {
   const char* p = skipWhiteSpaces(str);
 
-  const char* endptrval = str;
+  uint64_t uret;
+  const char* endptrval = 0;
   uint64_t  rdVal = 0;
   ptrdiff_t rdExp = 0, exp;
   uint64_t  maxVal = (UINT64_MAX-9)/10;
-  int lsbits = 0;
-  uint64_t uret = 0;
   uint64_t mant;
+  int lsbits = 0;
   int sticky;
   int neg, nege;
-  const int MAX_EXP =  310;
-  const int MIN_EXP = -345;
   enum { PARSE_FRACT, PARSE_INT = 1, PARSE_EXP };
   for (int parseState = PARSE_INT;;parseState = PARSE_EXP) {
     unsigned signC = p[0];
@@ -114,51 +112,46 @@ small_strtod(const char* str, char** endptr)
       }
 
       // non-digit
-      if (parseState != PARSE_EXP) {
-        if (parseState == PARSE_INT) {
-          if (c == '.') {
-            // decimal point
-            if (endptrval != str) // there were digits before decimal point
-              endptrval = p;
-            parseState = PARSE_FRACT;
-            continue;
-          }
+      if (parseState == PARSE_EXP)
+        goto end_of_parser;
+
+      neg     = nege;
+      exp     = rdExp;
+      mant    = rdVal;
+      sticky  = (lsbits != 0);
+
+      if (parseState == PARSE_INT) {
+        if (c == '.') {
+          // decimal point
+          if (endptrval != 0) // there were digits before decimal point
+            endptrval = p;
+          parseState = PARSE_FRACT;
+          continue;
         }
-        // end of mantissa
-        if (endptrval == str) {  // conversion failed
-          neg = 0;
-          goto done;
-        }
-        // conversion succeed
-        neg     = nege;
-        exp     = rdExp;
-        mant    = rdVal;
-        sticky  = (lsbits != 0);
-        if (c == 'e' || c == 'E') {
-          // possibly, exponent present
-          rdVal = 0;
-          ptrdiff_t aMaxVal = (nege == 0) ? MAX_EXP - exp : -MIN_EXP + exp ;
-          maxVal = aMaxVal < 0 ? 0 : aMaxVal;
-          break;
-        }
-      } else {
-        // parseState == PARSE_EXP
-        exp = nege==0 ? exp + rdVal : exp - rdVal;
       }
+
+      // end of mantissa
+      if (endptrval==0) { // conversion fail
+        endptrval = str;
+        uret = 0;
+        goto epilog;
+      }
+
+      // conversion succeed
+      rdVal   = 0;
+      if (c == 'e' || c == 'E') {
+        // possibly, exponent present
+        maxVal = (uint64_t)1 << 32;
+        break;
+      }
+
       goto end_of_parser;
     }
   }
   end_of_parser:;
 
+  uret = 0;
   if (mant != 0) {
-    if (exp <= MIN_EXP) {
-      goto done;
-    }
-    if (exp >= MAX_EXP) {
-      uret = (uint64_t)2047 << 52; // Inf
-      goto done;
-    }
-
     uint32_t w2 = (uint32_t)(mant >> 32);
     uint32_t w1 = (uint32_t)mant;
     uint32_t w0 = 0;
@@ -168,8 +161,20 @@ small_strtod(const char* str, char** endptr)
       w1   = 0;
       bine = 63 - 32;
     }
-    unsigned sexp = exp < 0;
-    unsigned mexp = sexp ? -exp : exp;
+
+    const int MAX_EXP_MAGNITUDE = 345;
+    int64_t exp64 = nege==0 ? rdVal : -rdVal;
+    exp64 += exp;
+    unsigned sexp = exp64 < 0;
+    if (sexp)
+      exp64 = -exp64;
+    if (exp64 >= MAX_EXP_MAGNITUDE) {
+      if (sexp == 0)
+        uret = (uint64_t)2047 << 52; // Inf
+      goto done;
+    }
+    unsigned mexp = exp64;
+
     for (;;) {
       // normalize mantissa
       bine -= normailize96(&w2, &w1, &w0);
@@ -238,10 +243,12 @@ small_strtod(const char* str, char** endptr)
   }
 
   done:
+  uret |= (uint64_t)neg << 63; // set sign bit
+
+  epilog:
   if (endptr)
     *endptr = (char*)endptrval;
 
-  uret |= (uint64_t)neg << 63; // set sign bit
   double dret;
   memcpy(&dret, &uret, sizeof(dret));
 
