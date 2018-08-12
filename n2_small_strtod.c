@@ -76,16 +76,8 @@ __attribute__ ((cold))
 small_strtod(const char* str, char** endptr)
 {
   const char* p = skipWhiteSpaces(str);
-  int neg = 0;
-  switch (p[0]) {
-    case '+': ++p;          break;
-    case '-': ++p; neg = 1; break;
-    default:                break;
-  }
 
   const char* endptrval = str;
-  enum { PARSE_FRACT, PARSE_INT = 1, PARSE_EXP };
-  int parseState = PARSE_INT;
   uint64_t  rdVal = 0;
   ptrdiff_t rdExp = 0, exp;
   uint64_t  maxVal = (UINT64_MAX-9)/10;
@@ -93,23 +85,34 @@ small_strtod(const char* str, char** endptr)
   uint64_t uret = 0;
   uint64_t mant;
   int sticky;
-  int nege;
+  int neg, nege;
   const int MAX_EXP =  310;
   const int MIN_EXP = -345;
-  for (;;) {
-    unsigned c = *p++;
-    unsigned dig = c - '0';
-    if (dig <= 9) {
-      endptrval = p;
-      rdExp += parseState;
-      if (rdVal <= maxVal) {
-        rdVal =
-          rdVal*10+dig;
-        --rdExp;
-      } else {
-        lsbits |= dig;
+  enum { PARSE_FRACT, PARSE_INT = 1, PARSE_EXP };
+  for (int parseState = PARSE_INT;;parseState = PARSE_EXP) {
+    unsigned signC = p[0];
+    nege = (signC=='-');
+    int isPlus =  (signC=='+');
+    p += nege | isPlus;
+
+    unsigned c;
+    for (;;) {
+      for (;;) {
+        c = *p++;
+        unsigned dig = c - '0';
+        if (dig > 9)
+          break; // non-digit
+        endptrval = p;
+        rdExp += parseState;
+        if (rdVal <= maxVal) {
+          rdVal =
+            rdVal*10+dig;
+          --rdExp;
+        } else {
+          lsbits |= dig;
+        }
       }
-    } else {
+
       // non-digit
       if (parseState != PARSE_EXP) {
         if (parseState == PARSE_INT) {
@@ -127,30 +130,25 @@ small_strtod(const char* str, char** endptr)
           goto done;
         }
         // conversion succeed
+        neg     = nege;
         exp     = rdExp;
         mant    = rdVal;
         sticky  = (lsbits != 0);
         if (c == 'e' || c == 'E') {
           // possibly, exponent present
-          nege = 0;
-          switch (p[0]) {
-            case '+': ++p;           break;
-            case '-': ++p; nege = 1; break;
-            default:                 break;
-          }
           rdVal = 0;
           ptrdiff_t aMaxVal = (nege == 0) ? MAX_EXP - exp : -MIN_EXP + exp ;
           maxVal = aMaxVal < 0 ? 0 : aMaxVal;
-          parseState = PARSE_EXP;
-          continue;
+          break;
         }
       } else {
         // parseState == PARSE_EXP
         exp = nege==0 ? exp + rdVal : exp - rdVal;
       }
-      break;
+      goto end_of_parser;
     }
   }
+  end_of_parser:;
 
   if (mant != 0) {
     if (exp <= MIN_EXP) {
