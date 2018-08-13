@@ -93,8 +93,8 @@ small_strtod(const char* str, char** endptr)
     int isPlus =  (signC=='+');
     p += nege | isPlus;
 
-    unsigned c;
     for (;;) {
+      unsigned c;
       for (;;) {
         c = *p++;
         unsigned dig = c - '0';
@@ -115,11 +115,6 @@ small_strtod(const char* str, char** endptr)
       if (parseState == PARSE_EXP)
         goto end_of_parser;
 
-      neg     = nege;
-      exp     = rdExp;
-      mant    = rdVal;
-      sticky  = (lsbits != 0);
-
       if (parseState == PARSE_INT) {
         if (c == '.') {
           // decimal point
@@ -132,12 +127,16 @@ small_strtod(const char* str, char** endptr)
 
       // end of mantissa
       if (endptrval==0) { // conversion fail
-        endptrval = str;
-        uret = 0;
-        goto epilog;
+        if (endptr)
+          *endptr = (char*)str;
+        return 0;
       }
 
       // conversion succeed
+      neg     = nege;
+      exp     = rdExp;
+      mant    = rdVal;
+      sticky  = (lsbits != 0);
       rdVal   = 0;
       if (c == 'e' || c == 'E') {
         // possibly, exponent present
@@ -149,6 +148,8 @@ small_strtod(const char* str, char** endptr)
     }
   }
   end_of_parser:;
+  if (endptr)
+    *endptr = (char*)endptrval;
 
   uret = 0;
   if (mant != 0) {
@@ -244,10 +245,6 @@ small_strtod(const char* str, char** endptr)
 
   done:
   uret |= (uint64_t)neg << 63; // set sign bit
-
-  epilog:
-  if (endptr)
-    *endptr = (char*)endptrval;
 
   double dret;
   memcpy(&dret, &uret, sizeof(dret));
