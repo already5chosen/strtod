@@ -92,8 +92,8 @@ small_strtod(const char* str, char** endptr)
     int isPlus =  (signC=='+');
     p += nege | isPlus;
 
+    unsigned c;
     for (;;) {
-      unsigned c;
       for (;;) {
         c = *p++;
         unsigned dig = c - '0';
@@ -118,33 +118,33 @@ small_strtod(const char* str, char** endptr)
       exp     = rdExp;
       sticky  = (lsbits != 0);
 
-      if (parseState == PARSE_INT) {
-        if (c == '.') {
-          // decimal point
-          if (endptrval != 0) // there were digits before decimal point
-            endptrval = p;
-          parseState = PARSE_FRACT;
-          continue;
-        }
-      }
-
-      // end of mantissa
-      if (endptrval==0) { // conversion fail
-        if (endptr)
-          *endptr = (char*)str;
-        return 0;
-      }
-
-      // conversion succeed
-      mant    = rdVal;
-      rdVal   = 0;
-      if (c == 'e' || c == 'E') {
-        // possibly, exponent present
+      if (parseState != PARSE_INT)
         break;
-      }
 
-      goto end_of_parser;
+      if (c != '.')
+        break;
+
+      // decimal point
+      if (endptrval != 0) // there were digits before decimal point
+        endptrval = p;
+
+      parseState = PARSE_FRACT;
     }
+
+    // end of mantissa
+    if (endptrval==0) { // conversion fail
+      if (endptr)
+        *endptr = (char*)str;
+      return 0;
+    }
+
+    // conversion succeed
+    mant    = rdVal;
+    rdVal   = 0;
+    if (c != 'e' && c != 'E')
+      break; // exponent absent
+
+    // possibly, exponent present
   }
   end_of_parser:
   if (endptr)
