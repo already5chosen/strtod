@@ -85,7 +85,7 @@ small_strtod(const char* str, char** endptr)
   int lsbits = 0;
   int sticky;
   int neg, nege;
-  enum { PARSE_FRACT, PARSE_INT = 1, PARSE_EXP };
+  enum { PARSE_INT = 0, PARSE_FRACT = 1, PARSE_EXP };
   for (int parseState = PARSE_INT;;parseState = PARSE_EXP) {
     unsigned signC = p[0];
     nege = (signC=='-');
@@ -100,13 +100,13 @@ small_strtod(const char* str, char** endptr)
         if (dig > 9)
           break; // non-digit
         endptrval = p;
-        rdExp += parseState;
+        rdExp -= parseState;
         if (rdVal < maxVal) {
           rdVal =
             rdVal*10+dig;
-          --rdExp;
         } else {
           lsbits |= dig;
+          ++rdExp;
         }
       }
 
