@@ -111,42 +111,40 @@ small_strtod(const char* str, char** endptr)
       }
 
       // non-digit
-      if (parseState == PARSE_EXP)
-        goto end_of_parser;
+      if (parseState == PARSE_INT) {
+        parseState = PARSE_FRACT;
+        if (c == '.') {
+          // decimal point
+          if (endptrval != 0) // there were digits before decimal point
+            endptrval = p;
+          continue;
+        }
+      }
+      break;
+    }
 
+    if (parseState != PARSE_EXP)
+    {
+      // end of mantissa
       neg     = nege;
       exp     = rdExp;
       sticky  = (lsbits != 0);
+      mant    = rdVal;
+      rdVal   = 0;
 
-      if (parseState != PARSE_INT)
-        break;
-
-      if (c != '.')
-        break;
-
-      // decimal point
-      if (endptrval != 0) // there were digits before decimal point
-        endptrval = p;
-
-      parseState = PARSE_FRACT;
+      if (endptrval==0) { // conversion fail
+        if (endptr)
+          *endptr = (char*)str;
+        return 0;
+      }
+      // conversion succeed
+      if (c == 'e' || c == 'E')
+        continue; // possibly, exponent present
+      // exponent absent
     }
-
-    // end of mantissa
-    if (endptrval==0) { // conversion fail
-      if (endptr)
-        *endptr = (char*)str;
-      return 0;
-    }
-
-    // conversion succeed
-    mant    = rdVal;
-    rdVal   = 0;
-    if (c != 'e' && c != 'E')
-      break; // exponent absent
-
-    // possibly, exponent present
+    break;
   }
-  end_of_parser:
+
   if (endptr)
     *endptr = (char*)endptrval;
 
