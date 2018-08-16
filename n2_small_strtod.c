@@ -1,11 +1,21 @@
 // #include <stdio.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <string.h>
 
 static const char *skipWhiteSpaces(const char *str)
 { // skip leading white spaces
   while (*str && *str <= ' ') ++str;
   return str;
+}
+
+//
+// map ASCII characters 'A'-'Z' to 'a' to 'a'-'z'
+// map ASCII characters 'a'-'z' to themselves
+// all other values are guaranteed to not be mapped intto 'a'-'z' range
+static int ascii_tolower(int c)
+{
+  return c | 0x20;
 }
 
 // return bit pattern of IEEE binary64
@@ -75,9 +85,9 @@ double
 __attribute__ ((cold))
 small_strtod(const char* str, char** endptr)
 {
-  const char* p = skipWhiteSpaces(str);
+  const uint8_t* p = (const uint8_t*)skipWhiteSpaces(str);
 
-  const char* endptrval = 0;
+  const uint8_t* endptrval = 0;
   uint64_t  rdVal = 0;
   ptrdiff_t rdExp = 0, exp;
   const uint64_t  maxVal = (((UINT64_MAX-9)/10)>>32)<<32;
@@ -138,7 +148,7 @@ small_strtod(const char* str, char** endptr)
         return 0;
       }
       // conversion succeed
-      if (c == 'e' || c == 'E')
+      if (ascii_tolower(c) == 'e')
         continue; // possibly, exponent present
       // exponent absent
     }
