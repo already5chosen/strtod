@@ -1,0 +1,18 @@
+# nios2-elf-gcc       -Wall -O2 -mhw-div  -mhw-mulx                 -c -ffreestanding -fbuiltin -I. n2_small_strtod.c -o nios2.o
+# mips-elf-gcc -Wall -O2 -mabi=32 -mips32r6 -mcompact-branches=always -c -ffreestanding -fbuiltin -I. n2_small_strtod.c -o mips.o
+# mips-elf-gcc -Wall -O2 -mabi=64 -mips64r6 -mcompact-branches=always -c -ffreestanding -fbuiltin -I. n2_small_strtod.c -o mips64.o
+# mips-elf-gcc        -Wall -O2 -mabi=32 -mmicromips                -c -ffreestanding -fbuiltin -I. n2_small_strtod.c -o umips.o
+# mips-elf-gcc        -Wall -O2 -mabi=64 -mmicromips                -c -ffreestanding -fbuiltin -I. n2_small_strtod.c -o umips64.o
+# riscv32-elf-gcc     -Wall -O2 -mabi=ilp32 -march=rv32im           -c -ffreestanding -fbuiltin -I. n2_small_strtod.c -o rv32im.o
+# riscv32-elf-gcc     -Wall -O2 -mabi=ilp32 -march=rv32imc          -c -ffreestanding -fbuiltin -I. n2_small_strtod.c -o rv32imc.o
+# riscv32-elf-gcc     -Wall -O2 -mabi=lp64  -march=rv64im           -c -ffreestanding -fbuiltin -I. n2_small_strtod.c -o rv64im.o
+# riscv32-elf-gcc     -Wall -O2 -mabi=lp64  -march=rv64imc          -c -ffreestanding -fbuiltin -I. n2_small_strtod.c -o rv64imc.o
+# powerpc-eabi-gcc    -Wall -O2 -m32 -mcpu=750                      -c -ffreestanding -fbuiltin -I. n2_small_strtod.c -o ppc32.o
+# powerpc-eabi-gcc    -Wall -O2 -mpowerpc64 -mcpu=power8            -c -ffreestanding -fbuiltin -I. n2_small_strtod.c -o ppc64.o
+# /d/bin/SPC5Studio/toolchain/bin/ppc-freevle-eabi-gcc \
+#                     -Wall -O2 -std=c99 -m32 -mvle                 -c -ffreestanding -fbuiltin -I. n2_small_strtod.c -o ppcvle.o
+# arm-eabi-gcc        -Wall -O2 -march=armv6   -marm                -c -ffreestanding -fbuiltin -I. n2_small_strtod.c -o arm32v6.o
+# arm-eabi-gcc        -Wall -O2 -march=armv7-a -marm                -c -ffreestanding -fbuiltin -I. n2_small_strtod.c -o arm32v7.o
+# arm-eabi-gcc        -Wall -O2 -march=armv8-a -marm                -c -ffreestanding -fbuiltin -I. n2_small_strtod.c -o arm32v8.o
+# arm-eabi-gcc        -Wall -O2 -march=armv7-m                      -c -ffreestanding -fbuiltin -I. n2_small_strtod.c -o thumb2.o
+# aarch64-elf-gcc     -Wall -O2                                     -c -ffreestanding -fbuiltin -I. n2_small_strtod.c -o arm64.o
