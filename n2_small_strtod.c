@@ -93,7 +93,7 @@ small_strtod(const char* str, char** endptr)
   const uint64_t  maxVal = (((UINT64_MAX-9)/10)>>32)<<32;
   uint64_t mant;
   int lsbits = 0;
-  int sticky;
+  unsigned sticky;
   int neg, nege;
   enum { PARSE_INT = 0, PARSE_FRACT = 1, PARSE_EXP };
   for (int parseState = PARSE_INT;;parseState = PARSE_EXP) {
@@ -138,7 +138,7 @@ small_strtod(const char* str, char** endptr)
       // end of mantissa
       neg     = nege;
       exp     = rdExp;
-      sticky  = (lsbits != 0);
+      sticky  = lsbits;
       mant    = rdVal;
       rdVal   = 0;
 
@@ -250,8 +250,7 @@ small_strtod(const char* str, char** endptr)
       } while (mexp >= decExp);
     }
     // printf("%08x:%08x:%08x\n", w2, w1, w0);
-    w1 |= ((w0>>22) != 0); // approximately 9-10 MS bits of w0 are good. The rest is garbage
-    w1 |= sticky;
+    w1 |= (((w0>>22) | sticky) != 0); // approximately 9-10 MS bits of w0 are good. The rest is garbage
     uret |= to_double(((uint64_t)w2 << 32) | w1, bine);
   }
 
