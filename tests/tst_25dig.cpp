@@ -25,8 +25,8 @@ int main(int argz, char** argv)
       if (endp != &arg[3]) {
         switch (arg[1]) {
           case 'd':
-            if (val < 6 || val > 25) {
-              fprintf(stderr, "Number of digit %d out of range [6..25]\n", val);
+            if (val < 6 || val > 31) {
+              fprintf(stderr, "Number of digit %d out of range [6..31]\n", val);
               return 1;
             }
             nDig = val;
@@ -50,9 +50,9 @@ int main(int argz, char** argv)
   }
 
   int ndigMin   = exactNdig ? nDig : 1;
-  const uint32_t incrFactor = uint32_t(round(ldexp(pow(10, (nDig-ndigMin+1)*1e-5)-1, 32)));
+  const double incrFactor = pow(10, (nDig-ndigMin+1)*1e-5)-1;
   const double mant0 = floor(nextafter(pow(10, ndigMin-1), DBL_MAX));
-  printf("Running test with %d to %d digits. incrFactor=%u.\n", ndigMin, nDig, incrFactor);
+  printf("Running test with %d to %d digits. incrFactor=%.10f.\n", ndigMin, nDig, incrFactor);
 
   double minErr = 0;
   double maxErr = 0;
@@ -64,7 +64,7 @@ int main(int argz, char** argv)
     double expMaxErr = 0;
     unsigned __int128 scaledMant = mant0 * (1 << 20);
     const uint64_t splitFactor = 1E12;
-    for (int mant_i = 0; mant_i < 100000; ++mant_i) {
+    for (int mant_i = 0; mant_i <= 100000; ++mant_i) {
       unsigned __int128 mant = scaledMant >> 20;
       uint64_t mant_h = mant / splitFactor;
       uint64_t mant_l = mant % splitFactor;
@@ -73,6 +73,15 @@ int main(int argz, char** argv)
         sprintf(inpbuf, ".%llu%012llue%d", mant_h, mant_l, exp);
       else
         sprintf(inpbuf, ".%llue%d", mant_l, exp);
+      if (mant_i==100000)
+        memset(&inpbuf[1], '9', nDig);
+
+      // if (mant_i < 5 || mant_i >= 100000-5 || mant_i % 2000 == 0) {
+        // uint32_t u[4];
+        // memcpy(u, &scaledMant, sizeof(scaledMant));
+        // printf("%6d %08x:%08x:%08x:%08x %s\n", mant_i, u[3], u[2], u[1], u[0], inpbuf);
+      // }
+
       char* endp0;
       double val0 = strtod(inpbuf, &endp0);
       char* endp1;
@@ -123,7 +132,7 @@ int main(int argz, char** argv)
         }
       }
 
-      scaledMant += (scaledMant*incrFactor) >> 32;
+      scaledMant += (unsigned __int128)(scaledMant*incrFactor);
     }
     // printf("%e\n", double(scaledMant >> 20));
     printf("exp=%6d err [%- 13.*f..%c%-12.*f] ULP\n"
