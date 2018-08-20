@@ -2,6 +2,14 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#ifdef __NIOS2
+#include "system.h"
+#endif
+
+#ifndef ALT_CPU_HARDWARE_MULX_PRESENT
+// on systems others than nios2 assume presence of mulx or similar instruction
+#define ALT_CPU_HARDWARE_MULX_PRESENT 1
+#endif
 
 static const char *skipWhiteSpaces(const char *str)
 { // skip leading white spaces
@@ -32,7 +40,7 @@ static uint64_t to_double(uint64_t mant, int exp)
 
     // subnormal
     do {
-      // shift mantisa to the right while folding together LS bits
+      // shift mantissa to the right while folding together LS bits
       mant = (mant >> 1) | (mant & 1);
       ++exp;
     } while (exp <= 0);
@@ -44,7 +52,7 @@ static uint64_t to_double(uint64_t mant, int exp)
   const uint32_t REM_MASK  = REM_MSB*2-1;        // 11 LS bits
 
   unsigned rem = mant & REM_MASK;
-  uint64_t ret = (mant & MANT_MASK) >> 11; // remove MS bit and shift mantisa to lS bits
+  uint64_t ret = (mant & MANT_MASK) >> 11; // remove MS bit and shift mantissa to lS bits
   rem |= (ret & 1); // tie breaks to nearest even
   ret |= ((uint64_t)exp << 52);
   ret += (rem > REM_MSB);
@@ -90,7 +98,7 @@ small_strtod(const char* str, char** endptr)
   const uint8_t* endptrval = 0;
   uint32_t  rdVal0, rdVal1, rdVal2;
   ptrdiff_t rdExp = 0, exp;
-  const uint32_t maxVal = (UINT32_MAX-9)/10;
+  const uint32_t maxVal = 0x100;
   uint32_t mant0, mant1, mant2;
   int lsbits = 0;
   unsigned sticky;
@@ -113,11 +121,16 @@ small_strtod(const char* str, char** endptr)
         endptrval = p;
         rdExp -= parseState;
         if (rdVal2 < maxVal) {
-          rdVal2 *= 10;
-          rdVal1 = (rdVal1 >> 4) * 10;
-          rdVal0 = (rdVal0 >> 4) * 10 + dig;
-          rdVal1 += rdVal0 >> 28; rdVal0 <<= 4;
-          rdVal2 += rdVal1 >> 28; rdVal1 <<= 4;
+          #if ALT_CPU_HARDWARE_MULX_PRESENT
+          uint64_t x10;
+          x10 = (uint64_t)rdVal0*10 + dig; rdVal0 = (uint32_t)x10; dig = (uint32_t)(x10 >> 32);
+          x10 = (uint64_t)rdVal1*10 + dig; rdVal1 = (uint32_t)x10; dig = (uint32_t)(x10 >> 32);
+          #else
+          uint32_t x10l, x10h;
+          x10l = rdVal0*10 + dig; x10h = (rdVal0>>4)*10; rdVal0 = x10l; dig = (x10h >> 28)+((x10h << 4) > x10l);
+          x10l = rdVal1*10 + dig; x10h = (rdVal1>>4)*10; rdVal1 = x10l; dig = (x10h >> 28)+((x10h << 4) > x10l);
+          #endif
+          rdVal2 = rdVal2*10 + dig;
         } else {
           lsbits |= dig;
           ++rdExp;
@@ -170,8 +183,6 @@ small_strtod(const char* str, char** endptr)
 
     unsigned sexp = nege;
     unsigned mexp = MAX_EXP_MAGNITUDE;
-    rdVal0 = (rdVal0 >> 4) | (rdVal1 << 24);
-    rdVal1 >>= 8;
     if ((rdVal2 | rdVal1) == 0) {
       if (sexp)
         exp = -exp;
@@ -185,11 +196,11 @@ small_strtod(const char* str, char** endptr)
         mexp = (uint32_t)exp64;
     }
 
- // printf("%08x:%08x:%08x %u.%u %u\n", mant2, mant1, mant0, sexp, mexp, sticky);
+// printf("%08x:%08x:%08x %u.%u %u\n", mant2, mant1, mant0, sexp, mexp, sticky);
     uint32_t w2 = mant2;
-    uint32_t w1 = mant1 | (mant0 >> 28);
-    uint32_t w0 = mant0 << 4;
-    int bine = 63+24;
+    uint32_t w1 = mant1;
+    uint32_t w0 = mant0;
+    int bine = 95;
 // printf("%08x:%08x:%08x %d\n", w2, w1, w0, bine);
     while (w2 == 0) {
       w2   = w1;
