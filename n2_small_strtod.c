@@ -2,6 +2,14 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#ifdef __NIOS2
+#include "system.h"
+#endif
+
+#ifndef ALT_CPU_HARDWARE_MULX_PRESENT
+// on systems others than nios2 assume presence of mulx or similar instruction
+#define ALT_CPU_HARDWARE_MULX_PRESENT 1
+#endif
 
 static const char *skipWhiteSpaces(const char *str)
 { // skip leading white spaces
@@ -88,10 +96,10 @@ small_strtod(const char* str, char** endptr)
   const uint8_t* p = (const uint8_t*)skipWhiteSpaces(str);
 
   const uint8_t* endptrval = 0;
-  uint64_t  rdVal = 0;
+  uint32_t rdVal0=0, rdVal1=0;
   ptrdiff_t rdExp = 0, exp;
-  const uint64_t  maxVal = (((UINT64_MAX-9)/10)>>32)<<32;
-  uint64_t mant;
+  const uint32_t maxVal = ((UINT64_MAX-9)/10)>>32;
+  uint32_t mant0, mant1;
   int lsbits = 0;
   unsigned sticky;
   int neg, nege;
@@ -111,9 +119,17 @@ small_strtod(const char* str, char** endptr)
           break; // non-digit
         endptrval = p;
         rdExp -= parseState;
-        if (rdVal < maxVal) {
-          rdVal =
-            rdVal*10+dig;
+        if (rdVal1 < maxVal) {
+          #if ALT_CPU_HARDWARE_MULX_PRESENT
+          uint64_t x10 = (((uint64_t)rdVal1 << 32)|rdVal0)*10 + dig;
+          rdVal0 = (uint32_t)x10;
+          rdVal1 = (uint32_t)(x10>>32);
+          #else
+          uint32_t x10h = (rdVal0>>4)*10;
+          rdVal0 = rdVal0*10 + dig;
+          dig = (x10h >> 28)+((x10h << 4) > rdVal0);
+          rdVal1 = rdVal1*10 + dig;
+          #endif
         } else {
           lsbits |= dig;
           ++rdExp;
@@ -139,8 +155,9 @@ small_strtod(const char* str, char** endptr)
       neg     = nege;
       exp     = rdExp;
       sticky  = lsbits;
-      mant    = rdVal;
-      rdVal   = 0;
+      mant0   = rdVal0;
+      mant1   = rdVal1;
+      rdVal0  = rdVal1 = 0;
 
       if (endptrval==0) { // conversion fail
         if (endptr)
@@ -159,18 +176,16 @@ small_strtod(const char* str, char** endptr)
     *endptr = (char*)endptrval;
 
   uint64_t uret = (uint64_t)neg << 63; // set sign bit
-  if (mant != 0) {
+  if ((mant0|mant1) != 0) {
     const int MAX_EXP_MAGNITUDE = 345;
 
-    uint32_t rd_w0 = (uint32_t)rdVal;
-    uint32_t rd_w1 = (uint32_t)(rdVal>>32);
     unsigned sexp = nege;
     unsigned mexp = MAX_EXP_MAGNITUDE;
-    if (rd_w1 == 0) {
+    if (rdVal1 == 0) {
       if (sexp)
         exp = -exp;
       int64_t exp64 = exp;
-      exp64 += rd_w0;
+      exp64 += rdVal0;
       if (exp64 < 0) {
         exp64 = -exp64;
         sexp = !sexp;
@@ -179,8 +194,8 @@ small_strtod(const char* str, char** endptr)
         mexp = (uint32_t)exp64;
     }
 
-    uint32_t w2 = (uint32_t)(mant >> 32);
-    uint32_t w1 = (uint32_t)mant;
+    uint32_t w2 = mant1;
+    uint32_t w1 = mant0;
     uint32_t w0 = 0;
     int bine = 63;
     if (w2 == 0) {
