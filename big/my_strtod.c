@@ -304,6 +304,14 @@ static uint64_t ldexp_u(uint64_t m2, int be)
   return mnt;
 }
 
+#ifdef _MSC_VER
+static __inline int __builtin_clzll(uint64_t x) {
+  unsigned long iMsb;
+  _BitScanReverse64(&iMsb, x);
+  return 63 - iMsb;
+}
+#endif
+
 static uint64_t quickCore(uint64_t mntL, uint64_t mntU, int decExp, bool* done)
 {
   int ie = decExp + 13*28;
@@ -311,14 +319,20 @@ static uint64_t quickCore(uint64_t mntL, uint64_t mntU, int decExp, bool* done)
   int iL = ie % 28; // index in tab1
 
   // multiply mntL,mntH by 10**decExp
+#ifdef _MSC_VER
+  uint64_t m1L, m2L, m1U, m2U;
+  m1L = _umul128(mntL, tab1[iL], &m2L);
+  m1U = _umul128(mntU, tab1[iL], &m2U);
+#else
   unsigned __int128 mxL = (unsigned __int128)mntL * tab1[iL];
   unsigned __int128 mxU = (unsigned __int128)mntU * tab1[iL];
-  int beL = iL, beU = beL; // binary exponent
   uint64_t m2L = (uint64_t)(mxL >> 64);
   uint64_t m1L = (uint64_t)(mxL);
-  uint64_t m0L = 0;
   uint64_t m2U = (uint64_t)(mxU >> 64);
   uint64_t m1U = (uint64_t)(mxU);
+#endif
+  int beL = iL, beU = beL; // binary exponent
+  uint64_t m0L = 0;
   uint64_t m0U = 0;
   // up to this point multiplication is exact
   if (iH != 13) {
@@ -326,6 +340,13 @@ static uint64_t quickCore(uint64_t mntL, uint64_t mntU, int decExp, bool* done)
     beL += (int)ceil((iH-13)*93.0139866568461);
     beU = beL;
     uint64_t x28 = tab28[iH];
+#ifdef _MSC_VER
+    uint64_t m0Lh;
+    m0L = _umul128(m1L, x28, &m0Lh);
+    m1L = _umul128(m2L, x28, &m2L);
+    unsigned char carry = _addcarry_u64(0, m1L, m0Lh, &m1L);
+    _addcarry_u64(carry, m2L, 0, &m2L);
+#else
     unsigned __int128 mlL, mlU;
     mlL = (unsigned __int128)m1L * x28;
     mxL = (unsigned __int128)m2L * x28;
@@ -333,13 +354,22 @@ static uint64_t quickCore(uint64_t mntL, uint64_t mntU, int decExp, bool* done)
     m2L = (uint64_t)(mxL >> 64);
     m1L = (uint64_t)(mxL);
     m0L = (uint64_t)(mlL);
+#endif
 
+#ifdef _MSC_VER
+    uint64_t m0Uh;
+    m0U = _umul128(m1U, x28+1, &m0Uh);
+    m1U = _umul128(m2U, x28+1, &m2U);
+    carry = _addcarry_u64(0, m1U, m0Uh, &m1U);
+    _addcarry_u64(carry, m2U, 0, &m2U);
+#else
     mlU = (unsigned __int128)m1U * (x28+1);
     mxU = (unsigned __int128)m2U * (x28+1);
     mxU += (uint64_t)(mlU >> 64);
     m2U = (uint64_t)(mxU >> 64);
     m1U = (uint64_t)(mxU);
     m0U = (uint64_t)(mlU);
+#endif
 
     if (m2L == 0) {
       beL -= 64;
