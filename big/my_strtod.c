@@ -10,16 +10,18 @@ enum {
   PARSE_DIG  = 17,
 };
 
-static uint64_t quickCore(uint64_t mntL, uint64_t mntH, int decExp, bool* done);
-
 typedef struct {
   uint64_t    mnt;
   const char* nz0;    // first non-zero digit
   const char* nzlast; // last non-zero digit
+  const char* eom;    // last non-zero digit
   int         dotI;
   int         eomI;   // end of part, accumulated within mnt
   int         decExp;
 } parse_t;
+
+static uint64_t quickCore(uint64_t mntL, uint64_t mntH, int decExp, bool* done);
+static int compareSrcWithMidpoint(parse_t* src, uint64_t u); // return -1,0,+1 when source string respectively <, = or > of u2d(u)+0.5ULP
 
 static double u2d(uint64_t x) {
   double y;
@@ -145,6 +147,7 @@ static const char* parse(parse_t* dst, const char* str)
   }
   dst->mnt  = mnt;
   dst->eomI = i;
+  dst->eom  = &str[i];
 
   // look for the end of mantissa
   int nzlast_i = -1;
@@ -167,6 +170,18 @@ static const char* parse(parse_t* dst, const char* str)
   }
 
   return NULL; // input too long
+}
+
+static const char* find_nzlast(const char* beg, const char* end)
+{
+  const char* ret = beg;
+  while (beg != end) {
+    char c = *beg;
+    if (c >= '1' && c <= '9')
+      ret = beg;
+    ++beg;
+  }
+  return ret;
 }
 
 double my_strtod(const char* str, char** str_end)
@@ -215,10 +230,21 @@ double my_strtod(const char* str, char** str_end)
   if (done)
     return u2d(uRet+signBit);
 
+  // Blitzkrieg didn't work, let's do it slowly
+  if (prs.nzlast==0)
+    prs.nzlast = find_nzlast(prs.nz0, prs.eom);
+
+  int cmp = compareSrcWithMidpoint(&prs, uRet);
+  if (cmp != '*') {
+    cmp |= uRet & 1; // break tie to even
+    uRet += (cmp > 0);
+    return u2d(uRet+signBit);
+  }
+
   return strtod(str, str_end);
 }
 
-static uint64_t tab1[28] = { // 5**k
+const static uint64_t tab1[28] = { // 5**k
   1ull,
   5ull,
   25ull,
@@ -249,7 +275,7 @@ static uint64_t tab1[28] = { // 5**k
   7450580596923828125ull,
 };
 
-static uint64_t tab28[25] = { // 10**((k-13)*28) * 2**ceil((13-k)*93.0139866568461+64)
+const static uint64_t tab28[25] = { // 10**((k-13)*28) * 2**ceil((13-k)*93.0139866568461+64)
   0xe1afa13afbd14d6d, //  10**(-364) * 2**(64+1209)
   0xe3e27a444d8d98b7, //  10**(-336) * 2**(64+1116)
   0xe61acf033d1a45df, //  10**(-308) * 2**(64+1023)
@@ -414,4 +440,167 @@ static uint64_t quickCore(uint64_t mntL, uint64_t mntU, int decExp, bool* done)
     *done = ldexp_u(m2U, beU)==resL;
 
   return resL;
+}
+
+static int mp_mulw(uint64_t x[], uint64_t y, int nwords)
+{ // in-place multiply vector x by scalar y
+  uint64_t acc = 0;
+  for (int i = 0; i < nwords; ++i) {
+#ifdef _MSC_VER
+    uint64_t xy0, xy1;
+    xy0 = _umul128(x[i], y, &xy1);
+    _addcarry_u64(
+      _addcarry_u64(0, xy0, acc, &x[i]),
+                       xy1, 0,   &acc);
+#else
+    unsigned __int128 xy = (unsigned __int128)x[i] * y + acc;
+    x[i] = (uint64_t)xy;
+    acc  = (uint64_t)(xy >> 64);
+#endif
+  }
+  x[nwords] = acc;
+  return nwords + (acc != 0); // number of result words
+}
+
+// return -1,0,+1 when source string respectively <, = or > of u2d(u)+0.5ULP
+// when comparison not implemented yet, return '*'
+static int compareSrcWithMidpoint(parse_t* src, uint64_t u)
+{
+  // parse u as binary64
+  const uint64_t BIT52 = (uint64_t)1 << 52;
+  const uint64_t MSK52 = BIT52 - 1;
+  uint64_t mnt = (u & MSK52) | BIT52;
+  int biasedExp = u >> 52;
+  if (biasedExp == 0) { // subnormal
+    mnt       &= MSK52;
+    biasedExp  = 1;
+  }
+  mnt = mnt*2 + 1; // += 0.5 ULP
+  int be = biasedExp - 1023 - 53; // binary exponent
+  if (be >= 0) {
+    // TODO
+    return '*';
+  }
+
+  uint64_t x[16]; // mantissa words, LS words first
+  x[0] = mnt;
+  int nwords = 1; // number of words in x[], including partial word
+  int nbits = 64 - __builtin_clzll(mnt); // number of significant bits in x[]
+  int nBe = -be;  // val = x[]*2**(-nBe)
+  if (nbits > nBe) {
+    // TODO
+    return '*';
+  }
+
+  // multiply by power of 10 until val > 0
+  while (nbits <= nBe) {
+    int nDig = (((nBe + 1 - nbits)*(uint64_t)1292913986)>>32) + 1;
+    if (nDig > 27)
+      nDig = 27;
+    // nDig is chosen to produce 1 or 2 digits above decimal point on the last step
+    nwords = mp_mulw(x, tab1[nDig], nwords); // x *= 5**nDig
+    nbits  = nwords*64 - __builtin_clzll(x[nwords-1]);
+    nBe   -= nDig;
+  }
+  x[nwords+0] = 0;
+  x[nwords+1] = 0;
+
+  const char* str = src->nz0;
+  const char* end_str = src->nzlast + 1;
+  // extract integer part (one word)
+  {
+  unsigned wi = nBe/64;
+  unsigned bi = nBe%64;
+  uint64_t x0 = x[wi+0];
+  uint64_t x1 = x[wi+1];
+  x[wi+0] = 0;
+  x[wi+1] = 0;
+  uint64_t xw = x0;
+  if (bi != 0) {
+    xw = (xw >> bi) | (x1 << (64-bi));
+    x[wi+0] = x0 & (((uint64_t)-1) >> (64-bi));
+  }
+
+  // compare MS digits
+  int sdig = *str++ - '0'; // no need to test the first character for dot
+  int xdig = xw < 10 ? (int)xw : (int)(xw/10);
+  if (sdig != xdig) {
+    int diff = (sdig - xdig + 15) % 10 - 5; // handle case 0.9x vs 1.x
+    return diff < 0 ? -1 : 1;
+  }
+  if (xw >= 10) {
+    xdig = xw % 10;
+    sdig = 0;
+    if (str != end_str) {
+      char c = *str++;
+      if (c== '.') c = *str++;
+      sdig = c - '0';
+    }
+    if (sdig != xdig)
+      return sdig < xdig ? -1 : 1;
+  }
+  }
+
+  // compare the rest, 27 digits at time
+  while (nBe > 0) {
+    int nDig = nBe > 27 ? 27 : nBe;
+    mp_mulw(x, tab1[nDig], (nBe-1)/64+1); // x *= 5**nDig
+    nBe -= nDig;
+    // extract integer part (2 words)
+    unsigned wi = nBe/64;
+    unsigned bi = nBe%64;
+    uint64_t x0 = x[wi+0];
+    uint64_t xw0 = x0;
+    uint64_t xw1 = x[wi+1];
+    x[wi+0] = 0;
+    x[wi+1] = 0;
+    if (bi != 0) {
+      xw0 = (xw0 >> bi) | (xw1 << (64-bi));
+      xw1 = (xw1 >> bi) | (x[wi+2] << (64-bi));
+      x[wi+0] = x0 & (((uint64_t)-1) >> (64-bi));
+      x[wi+2] = 0;
+    }
+
+    // read nDig digits from source and convert to binary
+    uint64_t sw0 = 0;
+    uint64_t sw1 = 0;
+    if (str != end_str) {
+      int cnt = nDig;
+      do {
+        sw1 = sw0;
+        sw0 = 0;
+        int nd = cnt > 9 ? cnt - 9 : cnt;
+        cnt -= nd;
+        if (str != end_str) {
+          do {
+            int dig = 0;
+            if (str != end_str) {
+              char c = *str++;
+              if (c== '.') c = *str++;
+              dig = c - '0';
+            }
+            sw0 = sw0*10 + dig;
+          } while (--nd);
+        }
+      } while (cnt > 0);
+    }
+    const uint64_t pw9 = 1000000000ull;
+#ifdef _MSC_VER
+    uint64_t sq0, sq1;
+    sq0 = _umul128(sw1, pw9, &sq1);
+    _addcarry_u64(
+      _addcarry_u64(0, sw0, sq0, &sw0),
+                       sq1, 0,   &sw1);
+#else
+    unsigned __int128 sq = (unsigned __int128)sw1 * pw9 + sw0;
+    sw1 = (uint64_t)(sq >> 64);
+    sw0 = (uint64_t)(sq);
+#endif
+    if (sw1 != xw1)
+      return sw1 < xw1 ? -1 : 1;
+    if (sw0 != xw0)
+      return sw0 < xw0 ? -1 : 1;
+  }
+
+  return 0;
 }
