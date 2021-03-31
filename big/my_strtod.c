@@ -462,29 +462,28 @@ static int compareSrcWithMidpoint(parse_t* src, uint64_t u)
   const uint64_t BIT54 = (uint64_t)1 << 54;
   const uint64_t MSK54 = BIT54 - 1;
 
+  // calculate Thr - a mid point between representable FP numbers
   uint64_t mnt = ((u*2) & MSK53) | 1 | BIT53;// += 0.5 ULP
   int biasedExp = u >> 52;
-  int nbits = 54;       // number of significant bits in mnt
   if (biasedExp == 0) { // subnormal
     mnt       &= MSK53;
     biasedExp  = 1;
-    nbits = 64 - __builtin_clzll(mnt); // number of significant bits in mnt
   }
+  int nBe = 1023 + 53 - biasedExp; // reversed binary exponent. Thr = mnt*2**(-nBe)
 
-  int be  = biasedExp - 1023 - 53; // binary exponent
-  int nBe = -be;                   // val = mnt*2**(-nBe)
-  uint64_t x[18]; // mantissa words, LS words first
+  uint64_t x[18]; // buffer for mantissa words, LS words first.
+                  // x[] hold mantissa either of integer part of the source string or of Thr
+
   const char* str = src->nz0;
   const char* end_str = src->nzlast + 1;
-  if (nbits + be > 0) {
-    // x = mnt * 2**be >= 1.0, so it has an integer part
 
-    // Calculate number of decimal digits in the integer part of the source string
-    int nParseAccDig = (int)(src->eom - src->nz0); // number characters between start and end of accumulation
-    if (src->dot && src->dot < src->eom)
-      nParseAccDig -= 1; // one of the character was dot rather than digit
-    int nDigitInt = src->decExp + src->dotI - src->eomI + nParseAccDig;
+  // Calculate number of decimal digits in the integer part of the source string
+  int nParseAccDig = (int)(src->eom - src->nz0); // number characters between start and end of accumulation
+  if (src->dot && src->dot < src->eom)
+    nParseAccDig -= 1; // one of the characters was dot rather than digit
+  int nDigitInt = src->decExp + src->dotI - src->eomI + nParseAccDig;
 
+  if (nDigitInt > 0) { // There exists an integer part
     // Convert integer part of the source string to binary
     x[0] = 0;
     int nwords = 0; // number of words in x[], including partial word
@@ -524,9 +523,11 @@ static int compareSrcWithMidpoint(parse_t* src, uint64_t u)
       remDig -= 19;
     }
 
-    // extract bits of x aligned to bits in mntat the same position a
+    // extract bits of x aligned to bits in mnt
     uint64_t sMnt, sRem = 0, xMnt = mnt;
+    int be  = -nBe; // binary exponent of Thr. Thr = mnt*2**(be)
     if (be > 0) {
+      // extract sMnt from x starting from bit # be
       int wi = be / 64;
       int bi = be % 64;
       sMnt = x[wi+0];
@@ -536,15 +537,15 @@ static int compareSrcWithMidpoint(parse_t* src, uint64_t u)
       }
       sMnt &= MSK54;
     } else {
-      sMnt = x[0];
-      xMnt >>= -be;
+      sMnt = x[0];   // extract sMnt from x starting from bit 0
+      xMnt >>= -be;  // extract xMnt from mnt starting from bit # -be
     }
 
     // compare integer parts
     if (sMnt != xMnt)
       return sMnt < xMnt ? -1 : 1;
 
-    if (be >= 0) {
+    if (be >= 0) { // Thr does not contain fraction
       if (str < end_str)
         return 1;  // source is bigger, because there are more non-zero digits after converted part
 
@@ -563,21 +564,18 @@ static int compareSrcWithMidpoint(parse_t* src, uint64_t u)
     x[0] = mnt & ((uint64_t)-1 >> (64 + be));
     x[1] = 0;
     x[2] = 0;
-  } else {
-    // x = mnt * 2**be < 1.0, so only fractional part present
+  } else { // Only fractional part presents
     x[0] = mnt;
-                    // nbits == number of significant bits in x[]
     int nwords = 1; // number of words in x[], including partial word
     // multiply by power of 10 until val > 0
+    int multPowerOfTen = 1 - nDigitInt;
+    nBe -= multPowerOfTen;
     do {
-      int nDig = (((nBe + 1 - nbits)*(uint64_t)1292913986)>>32) + 1;
-      if (nDig > 27)
-        nDig = 27;
-      // nDig is chosen to produce 1 or 2 digits above decimal point on the last step
+      int nDig = multPowerOfTen < 27 ? multPowerOfTen : 27;
+      // a last nDig is chosen to produce 1 digit above decimal point
       nwords = mp_mulw(x, tab1[nDig], nwords, 0); // x *= 5**nDig
-      nbits  = nwords*64 - __builtin_clzll(x[nwords-1]);
-      nBe   -= nDig;
-    } while (nbits <= nBe);
+      multPowerOfTen -= 27;
+    } while (multPowerOfTen > 0);
     x[nwords+0] = 0;
     x[nwords+1] = 0;
 
@@ -594,27 +592,15 @@ static int compareSrcWithMidpoint(parse_t* src, uint64_t u)
       x[wi+0] = x0 & (((uint64_t)-1) >> (64-bi));
     }
 
-    // compare MS digits
+    // compare MS digit
     int sdig = *str++ - '0'; // no need to test the first character for dot
-    int xdig = xw < 10 ? (int)xw : (int)(xw/10);
-    if (sdig != xdig) {
-      int diff = (sdig - xdig + 15) % 10 - 5; // handle case 0.9x vs 1.x
-      return diff < 0 ? -1 : 1;
-    }
-    if (xw >= 10) {
-      xdig = xw % 10;
-      sdig = 0;
-      if (str != end_str) {
-        char c = *str++;
-        if (c== '.') c = *str++;
-        sdig = c - '0';
-      }
-      if (sdig != xdig)
-        return sdig < xdig ? -1 : 1;
-    }
+    int xdig = (int)xw;
+    if (sdig != xdig)
+      return sdig < xdig ? -1 : 1;
   }
 
   // compare the rest of fractional bits, 27 digits at time
+  // x[] contains mantissa of Thr
   while (nBe > 0) {
     int nDig = nBe > 27 ? 27 : nBe;
     mp_mulw(x, tab1[nDig], (nBe-1)/64+1, 0); // x *= 5**nDig
@@ -676,7 +662,7 @@ static int compareSrcWithMidpoint(parse_t* src, uint64_t u)
   }
 
   if (str < end_str)
-    return 1;
+    return 1; // no more bits in Thr, but source still contains significant digits
 
   return 0;
 }
