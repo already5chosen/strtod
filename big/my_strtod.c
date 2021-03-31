@@ -353,15 +353,14 @@ static uint64_t quickCore(uint64_t mntL, uint64_t mntU, int decExp, bool* done)
   uint64_t m2U = (uint64_t)(mxU >> 64);
   uint64_t m1U = (uint64_t)(mxU);
 #endif
-  int beL = iL, beU = beL; // binary exponent
+  int be = iL; // binary exponent
   uint64_t m0L = 0;
   uint64_t m0U = 0;
   // up to this point multiplication is exact
   if (iH != 13) {
     // this multiplication is approximate, so we need different coefficients for upper and lower estimates
-    // beL += (int)ceil((iH-13)*93.0139866568461);
-    beL += (((iH-13)*24383059) >> 18) + 1;
-    beU = beL;
+    // be += (int)ceil((iH-13)*93.0139866568461);
+    be += (((iH-13)*24383059) >> 18) + 1;
     uint64_t x28 = tab28[iH];
 #ifdef _MSC_VER
     uint64_t m0Lh;
@@ -394,49 +393,43 @@ static uint64_t quickCore(uint64_t mntL, uint64_t mntU, int decExp, bool* done)
     m0U = (uint64_t)(mlU);
 #endif
 
-    if (m2L == 0) {
-      beL -= 64;
-      m2L = m1L; m1L = m0L; m0L = 0;
-    }
-
     if (m2U == 0) {
-      beU -= 64;
+      be -= 64;
+      m2L = m1L; m1L = m0L; m0L = 0;
       m2U = m1U; m1U = m0U; m0U = 0;
     }
   }
 
-  if (m2L == 0) {
-    beL -= 64;
-    m2L = m1L; m1L = 0;
-  }
-
   if (m2U == 0) {
-    beU -= 64;
+    be -= 64;
+    m2L = m1L; m1L = 0;
     m2U = m1U; m1U = 0;
   }
 
-  // normalize m2L:M1L
-  int lsh = __builtin_clzll(m2L);
+  // normalize m2U:M1U
+  int lsh = __builtin_clzll(m2U);
   if (lsh) {
     m2L = (m2L << lsh) | (m1L >> (64-lsh));
     m1L = (m1L << lsh);
-  }
-  beL -= lsh;
-  m2L |= ((m1L|m0L) != 0); // set sticky bit
-
-  // normalize m2U:M1U
-  lsh = __builtin_clzll(m2U);
-  if (lsh) {
     m2U = (m2U << lsh) | (m1U >> (64-lsh));
     m1U = (m1U << lsh);
   }
-  beU -= lsh;
+  be -= lsh;
+  m2L |= ((m1L|m0L) != 0); // set sticky bit
   m2U |= ((m1U|m0U) != 0); // set sticky bit
+
+  // normalize m2L (at most by 1 bt position)
+  const uint64_t BIT63 = (uint64_t)1 << 63;
+  int beL = be;
+  if (m2L < BIT63) {
+    m2L += m2L;
+    beL -= 1;
+  }
 
   *done = true;
   uint64_t resL = ldexp_u(m2L, beL);
-  if (m2L != m2U || beL != beU)
-    *done = ldexp_u(m2U, beU)==resL;
+  if (m2L != m2U)
+    *done = ldexp_u(m2U, be)==resL;
 
   return resL;
 }
