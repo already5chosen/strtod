@@ -419,8 +419,10 @@ static uint64_t quickCore(uint64_t mntL, uint64_t mntU, int decExp, bool* done)
   int lsh = __builtin_clzll(m2L);
   if (lsh) {
     m2L = (m2L << lsh) | (m1L >> (64-lsh));
+    m1L = (m1L << lsh);
   }
   beL -= lsh;
+  m2L |= ((m1L|m0L) != 0); // set sticky bit
 
   // normalize m2U:M1U
   lsh = __builtin_clzll(m2U);
@@ -429,7 +431,7 @@ static uint64_t quickCore(uint64_t mntL, uint64_t mntU, int decExp, bool* done)
     m1U = (m1U << lsh);
   }
   beU -= lsh;
-  m2U |= ((m1U|m0U) != 0); // round up
+  m2U |= ((m1U|m0U) != 0); // set sticky bit
 
   *done = true;
   uint64_t resL = ldexp_u(m2L, beL);
