@@ -2,8 +2,6 @@
 #include <string.h>
 #include <stdbool.h>
 #include <ctype.h>
-#include <math.h>
-// #include <stdlib.h>
 
 enum {
   INPLEN_MAX = 100000, // maximal length of legal input string, not including leading whitespace characters and sign
@@ -361,7 +359,8 @@ static uint64_t quickCore(uint64_t mntL, uint64_t mntU, int decExp, bool* done)
   // up to this point multiplication is exact
   if (iH != 13) {
     // this multiplication is approximate, so we need different coefficients for upper and lower estimates
-    beL += (int)ceil((iH-13)*93.0139866568461);
+    // beL += (int)ceil((iH-13)*93.0139866568461);
+    beL += (((iH-13)*24383059) >> 18) + 1;
     beU = beL;
     uint64_t x28 = tab28[iH];
 #ifdef _MSC_VER
