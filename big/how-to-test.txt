@@ -1,0 +1,60 @@
+Prerequisites:
+gcc/g++ or clang compiler, GMP library.
+For sake of brevity the rest of description assumes gcc.
+
+How to build:
+g++ -O2 -Wall gen_test1.cpp -o gen_test1
+g++ -O2 -Wall gen_test2.cpp -lgmp -o gen_test2
+g++ -O2 -Wall gen_test3.cpp -lgmp -o gen_test3
+g++ -O2 -Wall clib_test.cpp -o clib_test
+gcc -c -O2 -Wall my_strtod.c
+g++ -O2 -Wall clib_test.cpp my_strtod.o -DMY_STRTOD -o my_test
+
+How to prepare tests corpus:
+./gen_test1     >t1.txt
+./gen_test2 10  >t2-10.txt
+./gen_test2 20  >t2-20.txt
+./gen_test2 50  >t2-50.txt
+./gen_test2 100 >t2-100.txt
+./gen_test2 200 >t2-200.txt
+./gen_test2 500 >t2-500.txt
+./gen_test2 750 >t2-750.txt
+./gen_test2 800 >t2-800.txt
+./gen_test2 800 -emin=-310 -emax=-300 >t2-800-small.txt
+./gen_test2 800 -emin=300  -emax=-308 >t2-800-big.txt
+./gen_test3 >t3-all.txt
+./gen_test3 -fmax=1 >t3-0-1.txt
+./gen_test3 -fmin=1 >t3-1-inf.txt
+./gen_test3 -fmin=1e-20 -fmax=1e20 >t3-1e-20-1e20.txt
+./gen_test3 -fmax=1e-305 >t3-0-1e-305.txt
+./gen_test3 -fmin=1e305  >t3-1e305-inf.txt
+
+How to run tests:
+./clib_test t1.txt            100
+./clib_test t2-10.txt         100
+./clib_test t2-20.txt         100
+./clib_test t2-50.txt         50
+./clib_test t2-100.txt        20
+./clib_test t2-200.txt        10
+./clib_test t2-500.txt        5
+./clib_test t2-750.txt        5
+./clib_test t2-800.txt        5
+./clib_test t2-800-small.txt  5
+./clib_test t2-800-big.txt    5
+./clib_test t3-all.txt        10
+./clib_test t3-0-1.txt        10
+./clib_test t3-1-inf.txt      10
+./clib_test t3-1e-20-1e20.txt 20
+./clib_test t3-0-1e-305.txt   5
+./clib_test t3-1e305-inf.txt  5
+
+If you fill that the test runs too fast (the first reported number under 100 msec)
+or too slow (depends on your patience) then you can increase or decrease the second
+argument.
+
+If you are interested, then you are welcome to test my preliminary implementation of
+strtod() as well. Run the same tests with clib_test replaced by my_test
+
+Thank you.
+Michael
+
