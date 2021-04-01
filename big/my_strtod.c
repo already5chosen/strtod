@@ -81,7 +81,8 @@ static const char* parseTail(parse_t* dst, const char* str, int i)
 
   // look for the end of exponent
   for (; i < INPLEN_MAX; ++i) {
-    if (*(unsigned char*)&str[i] - '0' > 9)
+    unsigned char dig = *(unsigned char*)&str[i] - '0';
+    if (dig > 9)
       return &str[i]; // end found
   }
 
