@@ -4,6 +4,16 @@
 #include <cfloat>
 #include <random>
 
+static const char UsageStr[] =
+"gen_test1 - generate test vector consisting of canonical 17-digit\n"
+"            representations of finite IEEE-754 binary64 numbers\n"
+"Usage:\n"
+"gen_test1 [?] [-?] [count]\n"
+"where\n"
+"count - [optional] number of items to generate. Range [1:100000000]. Default 100000.\n"
+"-?, ? - show this message"
+;
+
 static uint64_t mulu(uint64_t x, uint64_t y) {
   return uint64_t(((unsigned __int128)x * y) >> 64);
 }
@@ -24,9 +34,17 @@ int main(int argz, char** argv)
 {
   long len = 100000;
   if (argz > 1) {
+    if (strcmp(argv[1], "?")==0 || strcmp(argv[1], "-?")==0) {
+      fprintf(stderr, "%s", UsageStr);
+      return 0;
+    }
     long v = strtol(argv[1], NULL, 0);
-    if (v > 0 && v < 100000000)
+    if (v > 0 && v <= 100000000) {
       len = v;
+    } else {
+      fprintf(stderr, "Illegal count '%s'.\n%s", argv[1], UsageStr);
+      return 1;
+    }
   }
 
   std::mt19937_64 gen;

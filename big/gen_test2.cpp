@@ -6,6 +6,19 @@
 
 #include <gmp.h>
 
+static const char UsageStr[] =
+"gen_test2 - generate test vector with specified number of significant digits\n"
+"Usage:\n"
+"gen_test2 nDigits [-c=count] [-emin=nnn] [-emax=xxx] [-s=seed] [?] [-?]\n"
+"where\n"
+"nDigits - number of significant decimal digits\n"
+"count   - [optional] number of items to generate. Range [1:100000000]. Default 100000.\n"
+"nnn     - [optional] lower edge of the range of decimal exponents. Default=-325\n"
+"xxx     - [optional] upper edge of the range of decimal exponents. Default=+325\n"
+"seed    - [optional] PRNG seed. Default=1\n"
+"-?, ?   - show this message"
+;
+
 enum {
   N_DIGITS_MIN =    2,
   N_DIGITS_MAX =  800,
@@ -38,36 +51,39 @@ static void MakeTables();
 
 int main(int argz, char** argv)
 {
-  // { int e; double d = frexp(u2d(1), &e); printf("%f %d %.17e\n", d, e, u2d(1));}
-  // { int e; double x = DBL_MAX; double d = frexp(x, &e); printf("%.20f %d %.17e\n", d, e, x);}
-  if (argz < 2) {
-    fprintf(stderr,
-      "Usage:\n"
-      "gen_test2 nDigits [-c=count] [-emin=nnn] [-emax=nnn]\n"
-    );
-    return 1;
-  }
-
   int nDigits = 0;
   if (argz > 1) {
+    if (strcmp(argv[1], "?")==0 || strcmp(argv[1], "-?")==0) {
+      fprintf(stderr, "%s", UsageStr);
+      return 0;
+    }
     char* endp;
     long v = strtol(argv[1], &endp, 0);
     if (v >= N_DIGITS_MIN && v <= N_DIGITS_MAX) {
       nDigits = v;
     } else {
       if (endp == argv[1])
-        fprintf(stderr, "Bad nDigits parameter '%s'. Must be a number.\n", endp);
+        fprintf(stderr, "Bad nDigits parameter '%s'. Must be a number.\n", argv[1]);
       else
-        fprintf(stderr, "Bad nDigits parameter '%s'. Out of ramge [%d:%d].\n", endp, N_DIGITS_MIN, N_DIGITS_MAX);
+        fprintf(stderr, "Bad nDigits parameter '%s'. Out of range [%d:%d].\n", argv[1], N_DIGITS_MIN, N_DIGITS_MAX);
       return 1;
     }
+  } else {
+    fprintf(stderr, "%s", UsageStr);
+    return 1;
   }
 
   long nItems = 100000;
   int  decexpMin = DECEXP_MIN;
   int  decexpMax = DECEXP_MAX;
+  int  seed = 1;
   for (int arg_i = 2; arg_i < argz; ++arg_i) {
     char* arg = argv[arg_i];
+    if (strcmp(arg, "?")==0 || strcmp(arg, "-?")==0) {
+      fprintf(stderr, "%s", UsageStr);
+      return 0;
+    }
+
     if (arg[0] != '-') {
       fprintf(stderr, "Illegal parameter '%s'\n", arg);
       return 1;
@@ -81,13 +97,13 @@ int main(int argz, char** argv)
     char* endp;
     long v = strtol(eq+1, &endp, 0);
     if (endp==eq+1) {
-      fprintf(stderr, "Bad option '%s'. '%s' is not a number.\n", arg, eq+1);
+      fprintf(stderr, "Bad option '%s'. '%s' is not a number.\n%s", arg, eq+1, UsageStr);
       return 1;
     }
 
     if        (0==strncmp(&arg[1], "c", eq-arg-1)) {
       if (v < 1 || v > 100000000) {
-        fprintf(stderr, "Bad option '%s'. Please specify number in range [1:100000000].\n", arg);
+        fprintf(stderr, "Bad count '%s'. Please specify number in range [1:100000000].\n", eq);
         return 1;
       }
       nItems = v;
@@ -103,6 +119,8 @@ int main(int argz, char** argv)
         return 1;
       }
       decexpMax = v;
+    } else if (0==strncmp(&arg[1], "s", eq-arg-1)) {
+      seed = v;
     } else {
       fprintf(stderr, "Unknown option '%s'.\n", arg);
       return 1;
@@ -110,7 +128,7 @@ int main(int argz, char** argv)
   }
 
   MakeTables();
-  return body(nDigits, nItems, decexpMin, decexpMax, 1);
+  return body(nDigits, nItems, decexpMin, decexpMax, seed);
 }
 
 static mpz_t  pow10_tab_z[POW10_TAB_LEN];

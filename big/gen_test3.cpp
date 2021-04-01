@@ -31,11 +31,13 @@ static const char UsageStr[] =
 "gen_test3 - produce test vector consisting of \"evil\" decimal strings\n"
 " exactly at midpoints between representable binary64 numbers\n"
 "Usage:\n"
-"gen_test3 [-?] [-c=count] [-fmin=nnn] [-fmax=xxx]\n"
+"gen_test3 [-c=count] [-fmin=nnn] [-fmax=xxx] [-s=seed] [-?] [?]\n"
 "where\n"
-"count - number of items to generate\n"
-"nnn   - lower edge of the range of absolute values of generated number. Default=0\n"
-"xxx   - upper edge of the range of absolute values of generated number. Default=DBL_MAX\n"
+"count - [optional] number of items to generate\n"
+"nnn   - [optional] lower edge of the range of absolute values of generated number. Default=0\n"
+"xxx   - [optional] upper edge of the range of absolute values of generated number. Default=DBL_MAX\n"
+"seed  - [optional] PRNG seed. Default=1\n"
+"-?, ? - show this message"
 ;
 
 int main(int argz, char** argv)
@@ -44,8 +46,13 @@ int main(int argz, char** argv)
   long nItems = 100000;
   double fMin = 0;
   double fMax = DBL_MAX;
+  int  seed = 1;
   for (int arg_i = 1; arg_i < argz; ++arg_i) {
     char* arg = argv[arg_i];
+    if (strcmp(arg, "?")==0) {
+      fprintf(stderr, "%s", UsageStr);
+      return 0;
+    }
     if (arg[0] != '-') {
       fprintf(stderr, "Illegal parameter '%s'\n%s", arg, UsageStr);
       return 1;
@@ -61,8 +68,8 @@ int main(int argz, char** argv)
       return 1;
     }
 
-    enum { O_C, O_FMIN, O_FMAX, O_UNK };
-    static const char *optstr[] = { "c", "fmin", "fmax" };
+    enum { O_C, O_FMIN, O_FMAX, O_UNK, O_S };
+    static const char *optstr[] = { "c", "fmin", "fmax", "s" };
     int op = 0;
     for (op = 0; op < O_UNK; ++op) {
       if (0==strncmp(&arg[1], optstr[op], eq-arg-1))
@@ -72,17 +79,25 @@ int main(int argz, char** argv)
     char* endp;
     switch (op) {
       case O_C:
+      case O_S:
       {
         long v = strtol(eq+1, &endp, 0);
         if (endp==eq+1) {
           fprintf(stderr, "Bad option '%s'. '%s' is not an integer number.\n", arg, eq+1);
           return 1;
         }
-        if (v < 1 || v > 100000000) {
-          fprintf(stderr, "Bad option '%s'. Please specify number in range [1:100000000].\n", arg);
-          return 1;
+        switch (op) {
+          case O_C:
+            if (v < 1 || v > 100000000) {
+              fprintf(stderr, "Bad option '%s'. Please specify number in range [1:100000000].\n", arg);
+              return 1;
+            }
+            nItems = v;
+            break;
+          case O_S:
+            seed = v;
+            break;
         }
-        nItems = v;
       } break;
 
       case O_FMIN:
@@ -120,7 +135,7 @@ int main(int argz, char** argv)
   }
 
   MakeTables();
-  return body(nItems, fMin, fMax, 1);
+  return body(nItems, fMin, fMax, seed);
 }
 
 enum {
