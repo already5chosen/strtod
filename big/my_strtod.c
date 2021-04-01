@@ -601,6 +601,9 @@ static int compareSrcWithMidpoint(parse_t* src, uint64_t u)
 
   // compare the rest of fractional bits, 27 digits at time
   // x[] contains mantissa of Thr
+  const char* nonDigit = end_str; // points to first input character that shouldn't be treated as digit
+  if (src->dot != NULL && src->dot < end_str && src->dot >= str)
+    nonDigit = src->dot;
   while (nBe > 0) {
     int nDig = nBe > 27 ? 27 : nBe;
     mp_mulw(x, tab1[nDig], (nBe-1)/64+1, 0); // x *= 5**nDig
@@ -624,25 +627,38 @@ static int compareSrcWithMidpoint(parse_t* src, uint64_t u)
     uint64_t sw0 = 0;
     uint64_t sw1 = 0;
     if (str != end_str) {
-      int cnt = nDig;
       do {
         sw1 = sw0;
         sw0 = 0;
-        int nd = cnt > 9 ? cnt - 9 : cnt;
-        cnt -= nd;
-        if (str != end_str) {
-          do {
-            int dig = 0;
-            if (str != end_str) {
-              char c = *str++;
-              if (c== '.') c = *str++;
-              dig = c - '0';
+        int nd = nDig > 9 ? nDig - 9 : nDig;
+        nDig -= nd;
+        do {
+          int chunkLen = nd;
+          int contLen = (int)(nonDigit-str);
+          if (contLen < chunkLen) {
+            // special cases
+            if (contLen == 0) { // str==nonDigit
+              if (str == end_str) {
+                sw0 *= (tab1[nd] << nd); // *= 10**nd
+                break;
+              }
+              // nonDigit point to dot rather than to end_str
+              ++str; // skip character
+              nonDigit = end_str;
+              continue;
             }
-            sw0 = sw0*10 + dig;
-          } while (--nd);
-        }
-      } while (cnt > 0);
+            chunkLen = contLen;
+          }
+          nd -= chunkLen;
+          // convert chunkLen characters to binary
+          do {
+            char c = *str++;
+            sw0 = sw0*10 + (c - '0');
+          } while (--chunkLen);
+        } while (nd);
+      } while (nDig);
     }
+    // sw1:sw0 are at base=1E9, convert to true binary
     const uint64_t pw9 = 1000000000ull;
 #ifdef _MSC_VER
     uint64_t sq0, sq1;
