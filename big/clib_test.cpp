@@ -4,20 +4,17 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cfloat>
 #include <random>
 #include <vector>
 #include <chrono>
+#include <algorithm>
 
-static uint64_t mulu(uint64_t x, uint64_t y) {
-#ifndef _MSC_VER
-  return uint64_t(((unsigned __int128)x * y) >> 64);
+#ifdef MY_STRTOD
+ extern "C" double my_strtod(const char* str, char** str_end);
+ #define uut_strtod my_strtod
 #else
-  uint64_t ret;
-  _umul128(x, y, &ret);
-  return ret;
+ #define uut_strtod strtod
 #endif
-}
 
 static uint64_t d2u(double x) {
   uint64_t y;
@@ -70,7 +67,7 @@ int main(int argz, char** argv)
     char* str = *it;
     uint64_t u = strtoull(&str[0], NULL, 16);
     char* endp;
-    double d   = strtod(&str[16], &endp);
+    double d   = uut_strtod(&str[16], &endp);
     if (endp==&str[16] || d2u(d) != u) {
       if (nErrors < 1000)
         fprintf(stderr,
@@ -93,20 +90,21 @@ int main(int argz, char** argv)
   printf("ok.\n"); fflush(stdout);
 
   // prepare plan of timing test;
-  std::mt19937_64 gen;
-  gen.seed(1);
   size_t inplen = inpv.size();
   std::vector<char*> rndinp(inplen*nRep);
-  for (long i = 0; i < nRep; ++i) {
-    for (size_t k = 0; k < inplen; ++k) {
-      rndinp[i*inplen+k] = &inpv.data()[mulu(gen(), inplen)][16];
-    }
+  for (size_t k = 0; k < inplen; ++k) {
+    char* p = &inpv.data()[k][16];
+    for (long i = 0; i < nRep; ++i)
+      rndinp[k*nRep+i] = p;
   }
+  std::mt19937_64 gen;
+  gen.seed(1);
+  std::shuffle(rndinp.begin(), rndinp.end(), gen);
 
   auto t0 = std::chrono::steady_clock::now();
   uint64_t dummy = 0;
   for (size_t k = 0; k < inplen*nRep; ++k)
-    dummy += d2u(strtod(rndinp[k], NULL));
+    dummy += d2u(uut_strtod(rndinp[k], NULL));
   auto t1 = std::chrono::steady_clock::now();
   auto dt = t1 - t0;
 
