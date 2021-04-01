@@ -1,3 +1,5 @@
+#include <cstdint>
+#include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -156,7 +158,6 @@ static void MakeTables()
     mpz_mul_2exp(x, x, 100 + ((1741647*i)>>19));
     mpz_tdiv_q(x, x, pow10_tab_z[i]);
     pow10i_tab_d[i] = ldexp(mpz_get_d(x), -100);
-    // printf("%10.5f\n", pow10i_tab_d[i]);
   }
 
   // set dblMaxLimit to DBL_MAX + 0.5 ULP(DBL_MAX)
@@ -165,30 +166,24 @@ static void MakeTables()
   mpz_sub_ui  (dblMaxLimit, dblMaxLimit, 1);       // = 2**54-1
   mpz_mul_2exp(dblMaxLimit, dblMaxLimit, 1024-54); // = ((2**54-1)/2**54)*2**1024
 }
-// int prt=0;
+
 static int core_cmp(mpz_t x, mpz_t zTmp1, mpz_t zTmp2, int decpow, double d, int dScale, bool inc)
 {
-  // if (prt)fprintf(stderr, "1.0: %.17e %d %.17f\n", d, dScale, ldexp(d, dScale));
   mpz_set_d(zTmp1, ldexp(d, dScale));
   if (inc)
     mpz_add_ui(zTmp1, zTmp1, 1);
-  // printf("1.1: %s %d\n", mpz_get_str(NULL, 10, zTmp1), decpow);
 
   if (decpow < 0)
     mpz_mul(zTmp1, zTmp1, pow10_tab_z[-decpow]);
-  // printf("1.2: %s\n", mpz_get_str(NULL, 10, zTmp1));
 
   if (dScale < 0)
     mpz_mul_2exp(zTmp1, zTmp1, -dScale);
-  // printf("1.3: %s\n", mpz_get_str(NULL, 10, zTmp1));
 
-  // printf("1.4: %s\n", mpz_get_str(NULL, 10, x));
   if (dScale <= 0)
     return mpz_cmp(x, zTmp1);
 
   // dScale > 0
   mpz_mul_2exp(zTmp2, x, dScale);
-  // printf("1.5: %s\n", mpz_get_str(NULL, 10, zTmp2));
   return mpz_cmp(zTmp2, zTmp1);
 }
 
@@ -238,11 +233,9 @@ static double calc_d(mpz_t x, mpz_t zTmp1, mpz_t zTmp2, int nDigits, int decexp,
   long dExp;
   double dMnt = mpz_get_d_2exp(&dExp, x) * pow10i_tab_d[-decpow];
   dExp -= (-decpow*1741647)>>19;
-  // if (prt)fprintf(stderr, "0.1: %.17f %ld %016llx\n", dMnt, dExp, d2u(dMnt));
   int e2;
   dMnt = frexp(dMnt, &e2);
   dExp += e2;
-  // if (prt)fprintf(stderr, "0.2: %.17f %ld %016llx\n", dMnt, dExp, d2u(dMnt));
 
   if (dExp < -1073)
     return 4.9406564584124654e-324; // nextafter(0, 1), has to be that, because possibility of underflow already rejected
@@ -255,18 +248,15 @@ static double calc_d(mpz_t x, mpz_t zTmp1, mpz_t zTmp2, int nDigits, int decexp,
   if (d0 <= DBL_MIN)
     d0 = nextafter(d0, 0); // subnormal can be rounded up. In order to be sure that our estimate is from below, lets reduce it by 1 ulp
   for (;;) {
-    // if (prt)fprintf(stderr, "0.3: %.17e %016llx\n", d0, d2u(d0));
     if (d0 == DBL_MAX)
       return DBL_MAX;
 
     double d1 = nextafter(d0, DBL_MAX);
-    // printf("4: %.17e %016llx\n", d1, d2u(d1));
     int ulpExp;
     frexp(d1-d0, &ulpExp);
     int dScale = 2 - ulpExp; // (d1-d0)* 2**dScale == 2
 
     int cond = core_cmp(x, zTmp1, zTmp2, decpow, d1, dScale, false);
-    // printf("5: %d\n", cond);
     if (cond == 0)
       return d1;
 
@@ -277,7 +267,6 @@ static double calc_d(mpz_t x, mpz_t zTmp1, mpz_t zTmp2, int nDigits, int decexp,
 
     // d0 <= x*10**decpow < d1
     cond = core_cmp(x, zTmp1, zTmp2, decpow, d0, dScale, true); // compare vs midpoint==(d0+d1)/2
-    // printf("6: %d\n", cond);
 
     if (cond < 0)
       return d0; // x*10**decpow < (d0+d1)/2
@@ -320,7 +309,6 @@ static int body(int nDigits, long nItems, int decexpMin, int  decexpMax, int see
   unsigned mntDigits[N_DIGITS_MAX/9+1];
   char mntStr[N_DIGITS_MAX + 10];
   for (long it = 0; it < nItems; ++it) {
-    // prt=it==78587;
     // generate random integer in range [0:10**nDigits)
     // 9 digits at time.
     // I'd like to do more digits, but don't know how to use 'long long' with GMP
@@ -335,7 +323,7 @@ static int body(int nDigits, long nItems, int decexpMin, int  decexpMax, int see
     double d = calc_d(zTmp0, zTmp1, zTmp2, nDigits, decexp, mntDigits);
     mntToStr(mntStr, fullNd, lastNd, mntDigits);
 
-    printf("%016llx %s0.%se%d\n", d2u(d) | (sign << 63), sign ? "-" : "", mntStr, decexp);
+    printf("%016" PRIx64 " %s0.%se%d\n", d2u(d) | (sign << 63), sign ? "-" : "", mntStr, decexp);
   }
   return 0;
 }

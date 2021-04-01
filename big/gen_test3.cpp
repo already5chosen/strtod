@@ -1,3 +1,5 @@
+#include <cstdint>
+#include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -200,7 +202,7 @@ static int body(long nItems, double fMin, double fMax, int seed)
     // add sign
     u |= sign;
 
-    printf("%016llx %s0.%se%d\n", u, sign ? "-" : "", mntStr, decExp+int(strlen(mntStr)));
+    printf("%016" PRIx64 " %s0.%se%d\n", u, sign ? "-" : "", mntStr, decExp+int(strlen(mntStr)));
   }
   return 0;
 }

@@ -1,6 +1,8 @@
 #ifdef _MSC_VER
  #define _CRT_SECURE_NO_WARNINGS
 #endif
+#include <cstdint>
+#include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -31,7 +33,7 @@ static double u2d(uint64_t x) {
 int main(int argz, char** argv)
 {
   if (argz < 2) {
-    fprintf(stderr, "Usage:tst3 inp-file-name [nRep]\n");
+    fprintf(stderr, "Usage:\n%s inp-file-name [nRep]\n", argv[0]);
     return 1;
   }
 
@@ -72,7 +74,7 @@ int main(int argz, char** argv)
       if (nErrors < 1000)
         fprintf(stderr,
         "Test fail at #%zu\n%s"
-        "%016llx %.17e %.17e %016llx\n"
+        "%016" PRIx64 " %.17e %.17e %016" PRIx64 "\n"
         , it-inpv.begin()
         , str
         , u

@@ -1,3 +1,5 @@
+#include <cstdint>
+#include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -15,7 +17,13 @@ static const char UsageStr[] =
 ;
 
 static uint64_t mulu(uint64_t x, uint64_t y) {
+#ifndef _MSC_VER
   return uint64_t(((unsigned __int128)x * y) >> 64);
+#else
+  uint64_t ret;
+  _umul128(x, y, &ret);
+  return ret;
+#endif
 }
 
 static uint64_t d2u(double x) {
@@ -57,7 +65,7 @@ int main(int argz, char** argv)
     uint64_t urnd = gen();
     uint64_t ufin = mulu(urnd*2, RSCALE) | (urnd & BIT63); // transform to finite range
     double d = u2d(ufin);
-    printf("%016llx %.17e\n", ufin, d);
+    printf("%016" PRIx64 " %.17e\n", ufin, d);
   }
   return 0;
 }
