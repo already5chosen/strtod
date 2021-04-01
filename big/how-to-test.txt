@@ -21,7 +21,7 @@ How to prepare tests corpus:
 ./gen_test2 750 >t2-750.txt
 ./gen_test2 800 >t2-800.txt
 ./gen_test2 800 -emin=-310 -emax=-300 >t2-800-small.txt
-./gen_test2 800 -emin=300  -emax=-308 >t2-800-big.txt
+./gen_test2 800 -emin=300  -emax=308 >t2-800-big.txt
 ./gen_test3 >t3-all.txt
 ./gen_test3 -fmax=1 >t3-0-1.txt
 ./gen_test3 -fmin=1 >t3-1-inf.txt
