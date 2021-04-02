@@ -10,6 +10,15 @@ g++ -O2 -Wall clib_test.cpp -o clib_test
 gcc -c -O2 -Wall my_strtod.c
 g++ -O2 -Wall clib_test.cpp my_strtod.o -DMY_STRTOD -o my_test
 
+How to build on Mac (courtesy Dan Downs):
+brew install gmp
+g++ -O2 -Wall -std=c++11 gen_test1.cpp -o gen_test1
+g++ -O2 -Wall -std=c++11 gen_test2.cpp -lgmp -L /opt/homebrew/lib -I /opt/homebrew/include -o gen_test2
+g++ -O2 -Wall -std=c++11 gen_test3.cpp -lgmp -L /opt/homebrew/lib -I /opt/homebrew/include -o gen_test3
+g++ -O2 -Wall -std=c++11 clib_test.cpp -o clib_test
+gcc -c -O2 -Wall my_strtod.c
+g++ -O2 -Wall -std=c++11 clib_test.cpp my_strtod.o -DMY_STRTOD -o my_test
+
 How to prepare tests corpus:
 ./gen_test1     >t1.txt
 ./gen_test2 10  >t2-10.txt
