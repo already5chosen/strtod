@@ -197,12 +197,13 @@ static int body(long nItems, double fMin, double fMax, int seed)
     mpz_get_str(mntStr, 10, x);
 
     // round to even
-    u += (u & 1);
+    uint64_t lsb = (u & 1);
+    u += lsb;
 
     // add sign
     u |= sign;
 
-    printf("%016" PRIx64 " %s0.%se%d\n", u, sign ? "-" : "", mntStr, decExp+int(strlen(mntStr)));
+    printf("%s%016" PRIx64 " %s0.%se%d\n", lsb ? "+" : "-",u, sign ? "-" : "", mntStr, decExp+int(strlen(mntStr)));
   }
   return 0;
 }

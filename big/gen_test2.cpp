@@ -187,10 +187,17 @@ static int core_cmp(mpz_t x, mpz_t zTmp1, mpz_t zTmp2, int decpow, double d, int
   return mpz_cmp(zTmp2, zTmp1);
 }
 
-static double calc_d(mpz_t x, mpz_t zTmp1, mpz_t zTmp2, int nDigits, int decexp, const unsigned mntDigits[])
+struct calc_d_res_t {
+  double d;
+  const char* tieStr; // "" for non-tie, "+" for tie broken away from zero, "-" for tie broken toward from zero
+  calc_d_res_t(double x) { d = x; tieStr=""; }
+  calc_d_res_t(double x, const char* str) { d = x; tieStr=str; }
+};
+
+static calc_d_res_t calc_d(mpz_t x, mpz_t zTmp1, mpz_t zTmp2, int nDigits, int decexp, const unsigned mntDigits[])
 {
   if (decexp <= -324)
-    return 0;
+    return calc_d_res_t(0);
 
   // calculate mantissa
   int fullNd = (nDigits-1)/9;
@@ -204,7 +211,7 @@ static double calc_d(mpz_t x, mpz_t zTmp1, mpz_t zTmp2, int nDigits, int decexp,
   mpz_add_ui(x, x, mntDigits[fullNd]);
 
   if (mpz_cmp_ui(x, 0)==0)
-    return 0;
+    return calc_d_res_t(0);
 
   // scale by power of 10
   int decpow = decexp - nDigits;
@@ -215,19 +222,30 @@ static double calc_d(mpz_t x, mpz_t zTmp1, mpz_t zTmp2, int nDigits, int decexp,
 
   if (decexp > 308) {
     // test for overflow
+    int cond = 0;
     if (decpow < 0) {
       mpz_mul(zTmp1, dblMaxLimit, pow10_tab_z[-decpow]);
-      if (mpz_cmp(x, zTmp1) >= 0)
-        return HUGE_VAL;
-    } else if (mpz_cmp(x, dblMaxLimit) >= 0) {
-      return HUGE_VAL;
+      cond = mpz_cmp(x, zTmp1);
+    } else {
+      cond = mpz_cmp(x, dblMaxLimit);
+    }
+    if (cond >= 0) {
+      calc_d_res_t ret(HUGE_VAL); // overflow
+      if (cond == 0)
+        ret.tieStr =  "+"; // tie broken away from zero
+      return ret;
     }
   }
 
   // test for underflow
-  mpz_mul_2exp(zTmp1, x, 1075);                  // = x/dblMinLimit==2**-1075
-  if (mpz_cmp(zTmp1, pow10_tab_z[-decpow]) <= 0) // x/dblMinLimit <= 10**(-decpow)
-    return 0; // underflow
+  mpz_mul_2exp(zTmp1, x, 1075);  // zTmp1 = x * 2**1075
+  int cond = mpz_cmp(zTmp1, pow10_tab_z[-decpow]);
+  if (cond <= 0) { // x * 2**1075 <= 10**(-decpow) <=> x*10**decpow <= 2**-1075
+    calc_d_res_t ret(0);
+    if (cond == 0)
+      ret.tieStr =  "-"; // tie broken toward zero
+    return ret; // underflow
+  }
 
   // convert to FP, truncating toward zero
   long dExp;
@@ -238,10 +256,10 @@ static double calc_d(mpz_t x, mpz_t zTmp1, mpz_t zTmp2, int nDigits, int decexp,
   dExp += e2;
 
   if (dExp < -1073)
-    return 4.9406564584124654e-324; // nextafter(0, 1), has to be that, because possibility of underflow already rejected
+    return calc_d_res_t(4.9406564584124654e-324); // nextafter(0, 1), has to be that, because possibility of underflow already rejected
 
   if (dExp > 1024)
-    return DBL_MAX; // has to be that, because possibility of overflow already rejected
+    return calc_d_res_t(DBL_MAX);  // has to be that, because possibility of overflow already rejected
 
   // dExp in [-1073:1024]
   double d0 = ldexp(dMnt, dExp);
@@ -249,7 +267,7 @@ static double calc_d(mpz_t x, mpz_t zTmp1, mpz_t zTmp2, int nDigits, int decexp,
     d0 = nextafter(d0, 0); // subnormal can be rounded up. In order to be sure that our estimate is from below, lets reduce it by 1 ulp
   for (;;) {
     if (d0 == DBL_MAX)
-      return DBL_MAX;
+      return calc_d_res_t(DBL_MAX);  // has to be that, because possibility of overflow already rejected
 
     double d1 = nextafter(d0, DBL_MAX);
     int ulpExp;
@@ -258,7 +276,7 @@ static double calc_d(mpz_t x, mpz_t zTmp1, mpz_t zTmp2, int nDigits, int decexp,
 
     int cond = core_cmp(x, zTmp1, zTmp2, decpow, d1, dScale, false);
     if (cond == 0)
-      return d1;
+      return calc_d_res_t(d1);
 
     if (cond > 0) {
       d0 = d1;
@@ -269,13 +287,17 @@ static double calc_d(mpz_t x, mpz_t zTmp1, mpz_t zTmp2, int nDigits, int decexp,
     cond = core_cmp(x, zTmp1, zTmp2, decpow, d0, dScale, true); // compare vs midpoint==(d0+d1)/2
 
     if (cond < 0)
-      return d0; // x*10**decpow < (d0+d1)/2
+      return calc_d_res_t(d0); // x*10**decpow < (d0+d1)/2
 
     if (cond > 0)
-      return d1; // x*10**decpow > (d0+d1)/2
+      return calc_d_res_t(d1); // x*10**decpow > (d0+d1)/2
 
     // x*10**decpow == (d0+d1)/2
-    return (d2u(d0) & 1)==0 ? d0 : d1; // tie broken to even
+    // break tie to even
+    if ((d2u(d0) & 1)==0)
+      return calc_d_res_t(d0, "-"); // tie broken toward zero
+    else
+      return calc_d_res_t(d1, "+"); // tie broken away from zero
   }
 }
 
@@ -320,10 +342,10 @@ static int body(int nDigits, long nItems, int decexpMin, int  decexpMax, int see
     uint64_t sign = urnd >> 63;
     int decexp = int(mulu(urnd<<1, decexpMax+1-decexpMin)) + decexpMin;
 
-    double d = calc_d(zTmp0, zTmp1, zTmp2, nDigits, decexp, mntDigits);
+    calc_d_res_t r = calc_d(zTmp0, zTmp1, zTmp2, nDigits, decexp, mntDigits);
     mntToStr(mntStr, fullNd, lastNd, mntDigits);
 
-    printf("%016" PRIx64 " %s0.%se%d\n", d2u(d) | (sign << 63), sign ? "-" : "", mntStr, decexp);
+    printf("%s%016" PRIx64 " %s0.%se%d\n", r.tieStr, d2u(r.d) | (sign << 63), sign ? "-" : "", mntStr, decexp);
   }
   return 0;
 }

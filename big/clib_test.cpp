@@ -55,7 +55,7 @@ int main(int argz, char** argv)
   char buf[4096];
   while (fgets(buf, sizeof(buf), fp)) {
     size_t len = strlen(buf);
-    if (len > 9) {
+    if (len > 17) {
       char* p = new char[len+1];
       memcpy(p, buf, len+1);
       inpv.push_back(p);
@@ -65,37 +65,61 @@ int main(int argz, char** argv)
 
   // correctness test
   int nErrors = 0;
+  int nTiesBrokenToOdd = 0;
   for (auto it = inpv.begin(); it != inpv.end(); ++it) {
     char* str = *it;
+    int dTie = 0;
+    switch (*str) {
+      case '+': dTie = -1; ++str; break;
+      case '-': dTie = +1; ++str; break;
+      default: break;
+    }
     uint64_t u = strtoull(&str[0], NULL, 16);
     char* endp;
     double d   = uut_strtod(&str[16], &endp);
     if (endp==&str[16] || d2u(d) != u) {
-      if (nErrors < 1000)
-        fprintf(stderr,
-        "Test fail at #%zu\n%s"
-        "%016" PRIx64 " %.17e %.17e %016" PRIx64 "\n"
-        , it-inpv.begin()
-        , str
-        , u
-        , u2d(u)
-        , d
-        , d2u(d)
-        );
-      ++nErrors;
+      if (endp != &str[16] && d2u(d) == u+dTie) {
+        // not an error, just tie broken to odd
+        ++nTiesBrokenToOdd;
+      } else {
+        if (nErrors < 1000)
+          fprintf(stderr,
+          "Test fail at #%zu\n%s"
+          "%016" PRIx64 " %.17e %.17e %016" PRIx64 "\n"
+          , it-inpv.begin()
+          , *it
+          , u
+          , u2d(u)
+          , d
+          , d2u(d)
+          );
+        ++nErrors;
+      }
     }
   }
   if (nErrors > 0) {
     printf("%d errors\n", nErrors);
     return 1;
   }
-  printf("ok.\n"); fflush(stdout);
+  printf("ok.");
+  if (nTiesBrokenToOdd > 0)
+    printf(" %d ties broken to odd.", nTiesBrokenToOdd);
+  printf("\n");
+  fflush(stdout);
 
   // prepare plan of timing test;
   size_t inplen = inpv.size();
   std::vector<char*> rndinp(inplen*nRep);
   for (size_t k = 0; k < inplen; ++k) {
-    char* p = &inpv.data()[k][16];
+    char* p = &inpv.data()[k][0];
+    switch (*p) {
+      case '+':
+      case '-':
+        ++p;
+      break;
+      default: break;
+    }
+    p += 16;
     for (long i = 0; i < nRep; ++i)
       rndinp[k*nRep+i] = p;
   }
