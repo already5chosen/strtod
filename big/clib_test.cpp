@@ -137,7 +137,8 @@ int main(int argz, char** argv)
   for (auto it = inpv.begin(); it != inpv.end(); ++it)
     delete [] *it;
 
-  printf("%.3f msec. %.2f nsec/iter\n", dt.count()*1e-6, double(dt.count())/(inplen*nRep));
+  auto nsec = std::chrono::duration_cast<std::chrono::nanoseconds>(dt);
+  printf("%.3f msec. %.2f nsec/iter\n", nsec.count()*1e-6, double(nsec.count())/(inplen*nRep));
   return dummy==42? 42 :0;
 }
 
