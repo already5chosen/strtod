@@ -101,11 +101,13 @@ Detailed description:
  Generate "evil" strtod() test vector. All test points reside exactly at middle points
  between two representable binary64 numbers.
  Usage:
- gen_test3 [-c=count] [-fmin=nnn] [-fmax=xxx] [-s=seed] [-?] [?]
+ gen_test3 [-c=count] [-fmin=nnn] [-fmax=xxx] [-dev=ddd] [-s=seed] [-?] [?]
  where
  count - [optional] number of items to generate
  nnn   - [optional] lower edge of the range of absolute values of generated number. Default=0
  xxx   - [optional] upper edge of the range of absolute values of generated number. Default=DBL_MAX
+ ddd   - [optional] deviation factor. Range [0:1], Default=0.
+         Non-zero ddd specifies that test point will be chosen from range (MPt-ULP*0.5*ddd:MPt+ULP*0.5*ddd)
  seed  - [optional] PRNG seed. Default=1
 
 2.5. clib_test

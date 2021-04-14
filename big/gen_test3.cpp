@@ -26,18 +26,21 @@ static double u2d(uint64_t x) {
 }
 #endif
 
-static int body(long nItems, double fMin, double fMax, int seed);
+static int body(long nItems, double fMin, double fMax, int seed, double dev);
 static void MakeTables();
 
 static const char UsageStr[] =
 "gen_test3 - produce test vector consisting of \"evil\" decimal strings\n"
-" exactly at midpoints between representable binary64 numbers\n"
+" exactly at midpoints between representable binary64 numbers or, optionally,\n"
+" close to a midpoint\n"
 "Usage:\n"
-"gen_test3 [-c=count] [-fmin=nnn] [-fmax=xxx] [-s=seed] [-?] [?]\n"
+"gen_test3 [-c=count] [-fmin=nnn] [-fmax=xxx] [-dev=ddd] [-s=seed] [-?] [?]\n"
 "where\n"
 "count - [optional] number of items to generate\n"
 "nnn   - [optional] lower edge of the range of absolute values of generated number. Default=0\n"
 "xxx   - [optional] upper edge of the range of absolute values of generated number. Default=DBL_MAX\n"
+"ddd   - [optional] deviation factor. Range [0:1], Default=0.\n"
+"        Non-zero ddd specifies that test point will be chosen from range (MPt-ULP*0.5*ddd:MPt+ULP*0.5*ddd)\n"
 "seed  - [optional] PRNG seed. Default=1\n"
 "-?, ? - show this message"
 ;
@@ -48,6 +51,7 @@ int main(int argz, char** argv)
   long nItems = 100000;
   double fMin = 0;
   double fMax = DBL_MAX;
+  double dev  = 0;
   int  seed = 1;
   for (int arg_i = 1; arg_i < argz; ++arg_i) {
     char* arg = argv[arg_i];
@@ -70,8 +74,8 @@ int main(int argz, char** argv)
       return 1;
     }
 
-    enum { O_C, O_FMIN, O_FMAX, O_UNK, O_S };
-    static const char *optstr[] = { "c", "fmin", "fmax", "s" };
+    enum { O_C, O_FMIN, O_FMAX, O_DEV, O_S, O_UNK };
+    static const char *optstr[] = { "c", "fmin", "fmax", "dev", "s" };
     int op = 0;
     for (op = 0; op < O_UNK; ++op) {
       if (0==strncmp(&arg[1], optstr[op], eq-arg-1))
@@ -104,6 +108,7 @@ int main(int argz, char** argv)
 
       case O_FMIN:
       case O_FMAX:
+      case O_DEV:
       {
         double v = strtod(eq+1, &endp);
         if (endp==eq+1) {
@@ -127,6 +132,14 @@ int main(int argz, char** argv)
             }
             fMax = v;
             break;
+
+          case O_DEV:
+            if (v < 0 || v > 1.0) {
+              fprintf(stderr, "Bad option '%s'. Please specify number in range [0:1].\n", arg);
+              return 1;
+            }
+            dev = v;
+            break;
         }
       } break;
 
@@ -137,11 +150,11 @@ int main(int argz, char** argv)
   }
 
   MakeTables();
-  return body(nItems, fMin, fMax, seed);
+  return body(nItems, fMin, fMax, seed, dev);
 }
 
 enum {
-  POW5_TAB_LEN = 1100,
+  POW5_TAB_LEN = 1200,
 };
 
 static mpz_t pow5_tab_z[POW5_TAB_LEN];
@@ -154,16 +167,19 @@ static void MakeTables()
   }
 }
 
-static int body(long nItems, double fMin, double fMax, int seed)
+static int body(long nItems, double fMin, double fMax, int seed, double dev)
 {
   std::mt19937_64 gen;
   gen.seed(seed);
 
-  mpz_t x;
+  mpz_t x, xDev;
   mpz_init(x);
-  char mntStr[800];
+  mpz_init(xDev);
+  char mntStr[1000];
   const uint64_t uMin = d2u(fMin);
   const uint64_t uMax = d2u(fMax);
+  const int      devScale = 53;
+  const int64_t  devMax = int64_t(ldexp(dev, devScale));
   const uint64_t BIT63 = uint64_t(1) << 63;
   const uint64_t BIT52 = uint64_t(1) << 52;
   const uint64_t MSK52 = BIT52 - 1;
@@ -172,6 +188,10 @@ static int body(long nItems, double fMin, double fMax, int seed)
     uint64_t rnd = gen();
     uint64_t u = mulu(rnd*2, uMax+1-uMin) + uMin;
     uint64_t sign = rnd & BIT63;
+
+    int64_t iDev = 0;
+    if (devMax != 0) // generate random integer in range (-dev*2**53:+dev*2**53)
+      iDev = int64_t(mulu(gen(), devMax*2-1)) - (devMax-1);
 
     // split into mantissa and exponent
     int biasedExp = u >> 52;
@@ -183,10 +203,17 @@ static int body(long nItems, double fMin, double fMax, int seed)
 
     mpz_set_d(x, double(mnt*2));
     mpz_add_ui(x, x, 1); // add 0.5 ULP
+    if (iDev != 0) { // add scaled deviation
+      mpz_set_d(xDev, double(iDev));
+      mpz_mul_2exp(x, x, devScale);
+      mpz_add(x, x, xDev);
+    }
 
     // convert to decimal
     int binExp = biasedExp - 1023 - 53;
     int decExp = 0;
+    if (iDev != 0)
+      binExp -= devScale;
     if (binExp < 0) {
       mpz_mul(x, x, pow5_tab_z[-binExp]);
       decExp = binExp;
@@ -196,14 +223,19 @@ static int body(long nItems, double fMin, double fMax, int seed)
 
     mpz_get_str(mntStr, 10, x);
 
-    // round to even
-    uint64_t lsb = (u & 1);
-    u += lsb;
+    const char *tieStr = "";
+    if (iDev == 0) { // round to even
+      uint64_t lsb = (u & 1);
+      u += lsb;
+      tieStr = lsb ? "+" : "-";
+    } else if (iDev > 0) {
+      u += 1;
+    }
 
     // add sign
     u |= sign;
 
-    printf("%s%016" PRIx64 " %s0.%se%d\n", lsb ? "+" : "-",u, sign ? "-" : "", mntStr, decExp+int(strlen(mntStr)));
+    printf("%s%016" PRIx64 " %s0.%se%d\n", tieStr, u, sign ? "-" : "", mntStr, decExp+int(strlen(mntStr)));
   }
   return 0;
 }
