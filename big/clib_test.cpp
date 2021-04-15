@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cfenv>
 #include <random>
 #include <vector>
 #include <chrono>
@@ -53,12 +54,39 @@ int main(int argz, char** argv)
   // read input
   std::vector<char*> inpv;
   char buf[4096];
+  int roundingMode = FE_TONEAREST;
   while (fgets(buf, sizeof(buf), fp)) {
     size_t len = strlen(buf);
     if (len > 17) {
       char* p = new char[len+1];
       memcpy(p, buf, len+1);
       inpv.push_back(p);
+    } else if (inpv.empty() && len > 0) {
+      // first short line could contain control information
+      switch (buf[0]) {
+        case 'd':
+        case 'D':
+          roundingMode = FE_DOWNWARD;
+          break;
+
+        case 'u':
+        case 'U':
+          roundingMode = FE_UPWARD;
+          break;
+
+        case 'n':
+        case 'N':
+          roundingMode = FE_TONEAREST;
+          break;
+
+        case 'z':
+        case 'Z':
+          roundingMode = FE_TOWARDZERO;
+          break;
+
+        default:
+          break;
+      }
     }
   }
   fclose(fp);
@@ -75,10 +103,12 @@ int main(int argz, char** argv)
       default: break;
     }
     uint64_t u = strtoull(&str[0], NULL, 16);
+    fesetround(roundingMode);
     char* endp;
     double d   = uut_strtod(&str[16], &endp);
+    fesetround(FE_TONEAREST);
     if (endp==&str[16] || d2u(d) != u) {
-      if (endp != &str[16] && d2u(d) == u+dTie) {
+      if (roundingMode==FE_TONEAREST && endp != &str[16] && d2u(d) == u+dTie) {
         // not an error, just tie broken to odd
         ++nTiesBrokenToOdd;
       } else {
@@ -127,11 +157,13 @@ int main(int argz, char** argv)
   gen.seed(1);
   std::shuffle(rndinp.begin(), rndinp.end(), gen);
 
+  fesetround(roundingMode);
   auto t0 = std::chrono::steady_clock::now();
   uint64_t dummy = 0;
   for (size_t k = 0; k < inplen*nRep; ++k)
     dummy += d2u(uut_strtod(rndinp[k], NULL));
   auto t1 = std::chrono::steady_clock::now();
+  fesetround(FE_TONEAREST);
   auto dt = t1 - t0;
 
   for (auto it = inpv.begin(); it != inpv.end(); ++it)
