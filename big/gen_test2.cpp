@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cfloat>
+#include <cfenv>
 #include <random>
 
 #include <gmp.h>
@@ -11,11 +12,14 @@
 static const char UsageStr[] =
 "gen_test2 - generate test vector with specified number of significant digits\n"
 "Usage:\n"
-"gen_test2 nDigits [-c=count] [-emin=nnn] [-emax=xxx] [-s=seed] [?] [-?]\n"
+"gen_test2 nDigits [-c=count] [-emin=nnn] [-emax=xxx] [-z] [-d] [-u] [-s=seed] [?] [-?]\n"
 "where\n"
 "nDigits - number of significant decimal digits\n"
 "count   - [optional] number of items to generate. Range [1:100000000]. Default 100000.\n"
 "nnn     - [optional] lower edge of the range of decimal exponents. Default=-325\n"
+"-z      - specify non-default rounding mode: rounding towards zero\n"
+"-d      - specify non-default rounding mode: rounding down (towards negative infinity)\n"
+"-u      - specify non-default rounding mode: rounding up (towards positive infinity)\n"
 "xxx     - [optional] upper edge of the range of decimal exponents. Default=+325\n"
 "seed    - [optional] PRNG seed. Default=1\n"
 "-?, ?   - show this message"
@@ -40,15 +44,13 @@ static uint64_t d2u(double x) {
   return y;
 }
 
-#if 0
 static double u2d(uint64_t x) {
   double y;
   memcpy(&y, &x, sizeof(y));
   return y;
 }
-#endif
 
-static int body(int nDigits, long nItems, int  decexpMin, int  decexpMax, int seed);
+static int body(int nDigits, long nItems, int  decexpMin, int  decexpMax, int seed, int  roundingMode);
 static void MakeTables();
 
 int main(int argz, char** argv)
@@ -79,6 +81,7 @@ int main(int argz, char** argv)
   int  decexpMin = DECEXP_MIN;
   int  decexpMax = DECEXP_MAX;
   int  seed = 1;
+  int  roundingModeChar = 'n';
   for (int arg_i = 2; arg_i < argz; ++arg_i) {
     char* arg = argv[arg_i];
     if (strcmp(arg, "?")==0 || strcmp(arg, "-?")==0) {
@@ -90,47 +93,90 @@ int main(int argz, char** argv)
       fprintf(stderr, "Illegal parameter '%s'\n", arg);
       return 1;
     }
-    char* eq = strchr(&arg[1], '=');
-    if (eq==0) {
-      fprintf(stderr, "Malformed option '%s'\n", arg);
-      return 1;
-    }
 
-    char* endp;
-    long v = strtol(eq+1, &endp, 0);
-    if (endp==eq+1) {
-      fprintf(stderr, "Bad option '%s'. '%s' is not a number.\n%s", arg, eq+1, UsageStr);
-      return 1;
-    }
-
-    if        (0==strncmp(&arg[1], "c", eq-arg-1)) {
-      if (v < 1 || v > 100000000) {
-        fprintf(stderr, "Bad count '%s'. Please specify number in range [1:100000000].\n", eq);
-        return 1;
+    if (strlen(&arg[1])==1) {
+      // short options
+      switch (arg[1]) {
+        case 'D':
+        case 'd':
+        case 'U':
+        case 'u':
+        case 'Z':
+        case 'z':
+          roundingModeChar = arg[1];
+          break;
+        default:
+          fprintf(stderr, "Unknown option flag '%s'\n", arg);
+          return 1;
       }
-      nItems = v;
-    } else if (0==strncmp(&arg[1], "emin", eq-arg-1)) {
-      if (v < DECEXP_MIN || v > decexpMax) {
-        fprintf(stderr, "Bad option '%s'. Please specify number in range [%d:%d].\n", arg, DECEXP_MIN, decexpMax);
-        return 1;
-      }
-      decexpMin = v;
-    } else if (0==strncmp(&arg[1], "emax", eq-arg-1)) {
-      if (v < decexpMin || v > DECEXP_MAX) {
-        fprintf(stderr, "Bad option '%s'. Please specify number in range [%d:%d].\n", arg, decexpMin, DECEXP_MAX);
-        return 1;
-      }
-      decexpMax = v;
-    } else if (0==strncmp(&arg[1], "s", eq-arg-1)) {
-      seed = v;
     } else {
-      fprintf(stderr, "Unknown option '%s'.\n", arg);
-      return 1;
+      char* eq = strchr(&arg[1], '=');
+      if (eq==0) {
+        fprintf(stderr, "Malformed option '%s'\n", arg);
+        return 1;
+      }
+
+      char* endp;
+      long v = strtol(eq+1, &endp, 0);
+      if (endp==eq+1) {
+        fprintf(stderr, "Bad option '%s'. '%s' is not a number.\n%s", arg, eq+1, UsageStr);
+        return 1;
+      }
+
+      if        (0==strncmp(&arg[1], "c", eq-arg-1)) {
+        if (v < 1 || v > 100000000) {
+          fprintf(stderr, "Bad count '%s'. Please specify number in range [1:100000000].\n", eq);
+          return 1;
+        }
+        nItems = v;
+      } else if (0==strncmp(&arg[1], "emin", eq-arg-1)) {
+        if (v < DECEXP_MIN || v > decexpMax) {
+          fprintf(stderr, "Bad option '%s'. Please specify number in range [%d:%d].\n", arg, DECEXP_MIN, decexpMax);
+          return 1;
+        }
+        decexpMin = v;
+      } else if (0==strncmp(&arg[1], "emax", eq-arg-1)) {
+        if (v < decexpMin || v > DECEXP_MAX) {
+          fprintf(stderr, "Bad option '%s'. Please specify number in range [%d:%d].\n", arg, decexpMin, DECEXP_MAX);
+          return 1;
+        }
+        decexpMax = v;
+      } else if (0==strncmp(&arg[1], "s", eq-arg-1)) {
+        seed = v;
+      } else {
+        fprintf(stderr, "Unknown option '%s'.\n", arg);
+        return 1;
+      }
+    }
+  }
+
+  int roundingMode = FE_TONEAREST;
+  if (roundingModeChar != 'n') {
+    // non-default rounding mode
+    printf("%c\n", roundingModeChar);
+    switch (roundingModeChar) {
+      case 'D':
+      case 'd':
+        roundingMode = FE_DOWNWARD;
+        break;
+
+      case 'U':
+      case 'u':
+        roundingMode = FE_UPWARD;
+        break;
+
+      case 'Z':
+      case 'z':
+        roundingMode = FE_TOWARDZERO;
+        break;
+
+      default:
+        break;
     }
   }
 
   MakeTables();
-  return body(nDigits, nItems, decexpMin, decexpMax, seed);
+  return body(nDigits, nItems, decexpMin, decexpMax, seed, roundingMode);
 }
 
 static mpz_t  pow10_tab_z[POW10_TAB_LEN];
@@ -141,6 +187,7 @@ static const unsigned pow10_tab_u[] = {
     1000*1000, 10*1000*1000, 100*1000*1000,
     1000*1000*1000,
 };
+static mpz_t dblMax;
 static mpz_t dblMaxLimit;
 
 static void MakeTables()
@@ -159,6 +206,8 @@ static void MakeTables()
     mpz_tdiv_q(x, x, pow10_tab_z[i]);
     pow10i_tab_d[i] = ldexp(mpz_get_d(x), -100);
   }
+
+  mpz_init_set_d(dblMax, DBL_MAX);
 
   // set dblMaxLimit to DBL_MAX + 0.5 ULP(DBL_MAX)
   mpz_init_set_si(dblMaxLimit, 1);
@@ -194,11 +243,8 @@ struct calc_d_res_t {
   calc_d_res_t(double x, const char* str) { d = x; tieStr=str; }
 };
 
-static calc_d_res_t calc_d(mpz_t x, mpz_t zTmp1, mpz_t zTmp2, int nDigits, int decexp, const unsigned mntDigits[])
+static calc_d_res_t calc_d(mpz_t x, mpz_t zTmp1, mpz_t zTmp2, int nDigits, int decexp, const unsigned mntDigits[], int  roundingMode)
 {
-  if (decexp <= -324)
-    return calc_d_res_t(0);
-
   // calculate mantissa
   int fullNd = (nDigits-1)/9;
   int lastNd = nDigits - fullNd*9;
@@ -213,6 +259,9 @@ static calc_d_res_t calc_d(mpz_t x, mpz_t zTmp1, mpz_t zTmp2, int nDigits, int d
   if (mpz_cmp_ui(x, 0)==0)
     return calc_d_res_t(0);
 
+  if (decexp <= -324)
+    return calc_d_res_t(roundingMode==FE_UPWARD ? u2d(1) : 0);
+
   // scale by power of 10
   int decpow = decexp - nDigits;
   if (decpow > 0) {
@@ -222,35 +271,68 @@ static calc_d_res_t calc_d(mpz_t x, mpz_t zTmp1, mpz_t zTmp2, int nDigits, int d
 
   if (decexp > 308) {
     // test for overflow
-    int cond = 0;
-    if (decpow < 0) {
-      mpz_mul(zTmp1, dblMaxLimit, pow10_tab_z[-decpow]);
-      cond = mpz_cmp(x, zTmp1);
-    } else {
-      cond = mpz_cmp(x, dblMaxLimit);
-    }
-    if (cond >= 0) {
-      calc_d_res_t ret(HUGE_VAL); // overflow
+    mpz_mul_2exp(zTmp1, pow10_tab_z[-decpow], 1024); // zTmp1 = 10**(-decpow)*2**1024
+    if (mpz_cmp(x, zTmp1) >= 0)  // x >= 10**(-decpow)*2**1024 <=> x*10**decpow >= 2**1024
+      return calc_d_res_t(HUGE_VAL);
+
+    // x*10**decpow < 2**1024
+    if (roundingMode == FE_TONEAREST) { // compare with dblMaxLimit== DBL_MAX+0.5*ULP
+      int cond = 0;
+      if (decpow < 0) {
+        mpz_mul(zTmp1, dblMaxLimit, pow10_tab_z[-decpow]);
+        cond = mpz_cmp(x, zTmp1);
+      } else {
+        cond = mpz_cmp(x, dblMaxLimit);
+      }
+      if (cond >= 0) {
+        calc_d_res_t ret(HUGE_VAL); // overflow
+        if (cond == 0)
+          ret.tieStr =  "+"; // tie broken away from zero
+        return ret;
+      }
+    } else if (roundingMode == FE_UPWARD) { // compare with DBL_MAX
+      int cond = 0;
+      if (decpow < 0) {
+        mpz_mul(zTmp1, dblMax, pow10_tab_z[-decpow]);
+        cond = mpz_cmp(x, zTmp1);
+      } else {
+        cond = mpz_cmp(x, dblMax);
+      }
       if (cond == 0)
-        ret.tieStr =  "+"; // tie broken away from zero
-      return ret;
+        return calc_d_res_t(DBL_MAX);
+      if (cond > 0)
+        return calc_d_res_t(HUGE_VAL);
     }
   }
 
   // test for underflow
-  mpz_mul_2exp(zTmp1, x, 1075);  // zTmp1 = x * 2**1075
-  int cond = mpz_cmp(zTmp1, pow10_tab_z[-decpow]);
-  if (cond <= 0) { // x * 2**1075 <= 10**(-decpow) <=> x*10**decpow <= 2**-1075
-    calc_d_res_t ret(0);
-    if (cond == 0)
-      ret.tieStr =  "-"; // tie broken toward zero
-    return ret; // underflow
+  if (roundingMode == FE_TONEAREST) {
+    mpz_mul_2exp(zTmp1, x, 1075);  // zTmp1 = x * 2**1075
+    int cond = mpz_cmp(zTmp1, pow10_tab_z[-decpow]);
+    if (cond <= 0) { // x * 2**1075 <= 10**(-decpow) <=> x*10**decpow <= 2**-1075
+      calc_d_res_t ret(0);
+      if (cond == 0)
+        ret.tieStr =  "-"; // tie broken toward zero
+      return ret; // underflow
+    }
+  } else {
+    mpz_mul_2exp(zTmp1, x, 1074);  // zTmp1 = x * 2**1074
+    int cond = mpz_cmp(zTmp1, pow10_tab_z[-decpow]);
+    if (cond <= 0) { // x * 2**1074 <= 10**(-decpow) <=> x*10**decpow <= 2**-1074
+      double dRet = (cond == 0 || roundingMode==FE_UPWARD) ? u2d(1) : 0;
+      return calc_d_res_t(dRet);
+    }
   }
-
   // convert to FP, truncating toward zero
   long dExp;
-  double dMnt = mpz_get_d_2exp(&dExp, x) * pow10i_tab_d[-decpow];
-  dExp -= (-decpow*1741647)>>19;
+  // double dMnt = mpz_get_d_2exp(&dExp, x) * pow10i_tab_d[-decpow];
+  double dMnt = mpz_get_d_2exp(&dExp, x);
+  if (decpow != 0) {
+    fesetround(FE_TOWARDZERO);
+    dMnt *= pow10i_tab_d[-decpow];
+    fesetround(FE_TONEAREST);
+    dExp -= (-decpow*1741647)>>19;
+  }
   int e2;
   dMnt = frexp(dMnt, &e2);
   dExp += e2;
@@ -284,13 +366,21 @@ static calc_d_res_t calc_d(mpz_t x, mpz_t zTmp1, mpz_t zTmp2, int nDigits, int d
     }
 
     // d0 <= x*10**decpow < d1
-    cond = core_cmp(x, zTmp1, zTmp2, decpow, d0, dScale, true); // compare vs midpoint==(d0+d1)/2
+    if (roundingMode == FE_TOWARDZERO)
+      return calc_d_res_t(d0);
+
+    cond = core_cmp(x, zTmp1, zTmp2, decpow, d0, dScale, roundingMode == FE_TONEAREST); // compare vs midpoint==(d0+d1)/2 or vs d0
 
     if (cond < 0)
       return calc_d_res_t(d0); // x*10**decpow < (d0+d1)/2
 
     if (cond > 0)
       return calc_d_res_t(d1); // x*10**decpow > (d0+d1)/2
+
+    // cond == 0
+
+    if (roundingMode == FE_UPWARD) // x*10**decpow == d0
+      return calc_d_res_t(d0);
 
     // x*10**decpow == (d0+d1)/2
     // break tie to even
@@ -317,8 +407,21 @@ static void mntToStr(char* dst, int fullNd, int lastNd, const unsigned mntDigits
   binToDecStr(&dst[fullNd*9], lastNd, mntDigits[fullNd]);
 }
 
-static int body(int nDigits, long nItems, int decexpMin, int  decexpMax, int seed)
+static int body(int nDigits, long nItems, int decexpMin, int  decexpMax, int seed, int roundingMode)
 {
+  int negRoundingMode = roundingMode;
+  int posRoundingMode = roundingMode;
+  switch (roundingMode) {
+    case FE_DOWNWARD:
+      posRoundingMode = FE_TOWARDZERO;
+      negRoundingMode = FE_UPWARD;
+      break;
+    case FE_UPWARD:
+      negRoundingMode = FE_TOWARDZERO;
+    default:
+      break;
+  }
+
   std::mt19937_64 gen;
   gen.seed(seed);
 
@@ -342,7 +445,7 @@ static int body(int nDigits, long nItems, int decexpMin, int  decexpMax, int see
     uint64_t sign = urnd >> 63;
     int decexp = int(mulu(urnd<<1, decexpMax+1-decexpMin)) + decexpMin;
 
-    calc_d_res_t r = calc_d(zTmp0, zTmp1, zTmp2, nDigits, decexp, mntDigits);
+    calc_d_res_t r = calc_d(zTmp0, zTmp1, zTmp2, nDigits, decexp, mntDigits, sign ? negRoundingMode : posRoundingMode);
     mntToStr(mntStr, fullNd, lastNd, mntDigits);
 
     printf("%s%016" PRIx64 " %s0.%se%d\n", r.tieStr, d2u(r.d) | (sign << 63), sign ? "-" : "", mntStr, decexp);
