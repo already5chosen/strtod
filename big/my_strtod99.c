@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <ctype.h>
+#include <fenv.h>
 
 #ifdef __GNUC__
 #define LIKELY(x)       __builtin_expect((x),1)
@@ -25,7 +26,7 @@ typedef struct {
   int         decExp;
 } parse_t;
 
-static int compareSrcWithMidpoint(parse_t* src, uint64_t u); // return -1,0,+1 when source string respectively <, = or > of u2d(u)+0.5ULP
+static int compareSrcWithThreshold(parse_t* src, uint64_t u, int roundingMode); // return -1,0,+1 when source string respectively <, = or > of u2d(u)+0.5ULP
 
 static double u2d(uint64_t x) {
   double y;
@@ -121,7 +122,7 @@ const static uint64_t tab220[] = {
  0x71505aee4b8f981d,
 };
 
-static uint64_t ldexp_u(uint64_t m56, int be)
+static uint64_t ldexp_u(uint64_t m56, int be, int roundingMode)
 {
   const uint64_t uINF = (uint64_t)2047 << 52;
   be += 64+1023+63; // biased exponent
@@ -136,15 +137,19 @@ static uint64_t ldexp_u(uint64_t m56, int be)
     mnt_bits -= rsh;
     be = 0;
     if (mnt_bits < 0)
-      return 0;
+      return roundingMode == FE_UPWARD ? 1 : 0;
     mnt >>= rsh;
   }
-  uint64_t tail = m56 << mnt_bits; // shift away data bits
-  tail |= (mnt & 1);           // break tie to even
-  mnt &= ((uint64_t)-1 >>12);  // mask out implied '1'
-  mnt |= (uint64_t)be << 52;   // + biased exponent
-  mnt += tail > ((uint64_t)1 << 63); // round to nearest
-  return mnt;
+  uint64_t tail = m56 << mnt_bits;          // shift away data bits
+  uint64_t res = mnt & ((uint64_t)-1 >>12); // mask out implied '1'
+  res |= (uint64_t)be << 52;                // + biased exponent
+  if (roundingMode == FE_TONEAREST) {
+    tail |= (mnt & 1);                 // break tie to even
+    res += tail > ((uint64_t)1 << 63); // round to nearest
+  } else if (roundingMode == FE_UPWARD) {
+    res += (tail != 0);                // round up
+  }
+  return res;
 }
 
 #ifdef _MSC_VER
@@ -294,22 +299,35 @@ double my_strtod(const char* str, char** str_end)
 
   // Convert to floating point
   // Calculate upper and lower estimates
-  uint64_t mntL = mnt;
-  if (mntL == 0)
-    return u2d(signBit);
-
-  if (decExp < -342)
+  if (mnt == 0)
     return u2d(signBit);
 
   const uint64_t uINF = (uint64_t)2047 << 52;
   if (decExp > 308)
     return u2d(uINF+signBit);
 
+  int roundingMode = fegetround();
+  // translate up/down rounding modes to toward zero/away from zero (represented by FE_UPWARD)
+  switch (roundingMode) {
+    case FE_DOWNWARD:
+      roundingMode = signBit ? FE_UPWARD : FE_TOWARDZERO;
+      break;
+    case FE_UPWARD:
+      roundingMode = signBit ? FE_TOWARDZERO : FE_UPWARD;
+      break;
+    default:
+      break;
+  }
+
+  if (decExp < -342)
+    return u2d(roundingMode!=FE_UPWARD ? signBit : signBit | 1);
+
   // decExp range [-342:308]
   int ie = decExp + 13*28; // range [22:672;
   int iH = ie / 28; // index in tab28, range [0:24]
   int iL = ie % 28; // index in tab1,  range [0:27]
 
+  uint64_t mntL = mnt;
   uint64_t mntU = mntL + (lastDig != 0);
   // multiply mntL,mntH by 10**decExp
 #ifdef _MSC_VER
@@ -395,7 +413,7 @@ double my_strtod(const char* str, char** str_end)
 
   uint64_t res, resU;
   for (uint64_t m2 = m2U;;) {
-    res = ldexp_u(m2, be);
+    res = ldexp_u(m2, be, roundingMode);
     if (m2 == m2L)
       break;
 
@@ -418,9 +436,15 @@ double my_strtod(const char* str, char** str_end)
     prs.lastDig = lastDig;
     prs.dot     = dot;
     prs.decExp  = decExp;
-    int cmp = compareSrcWithMidpoint(&prs, res);
-    cmp |= res & 1; // break tie to even
-    res += (cmp > 0);
+    int cmp = compareSrcWithThreshold(&prs, res, roundingMode);
+    if (roundingMode == FE_TONEAREST) {
+      cmp |= res & 1;   // break tie to even
+      res += (cmp > 0);
+    } else if (roundingMode == FE_UPWARD) {
+      res += (cmp > 0);
+    } else {
+      res += (cmp >= 0);
+    }
   }
   return u2d(res+signBit);
 }
@@ -503,7 +527,7 @@ static void inline move8(char* dst)
 }
 
 // return -1,0,+1 when source string respectively <, = or > of u2d(u)+0.5ULP
-static int compareSrcWithMidpoint(parse_t* src, uint64_t u)
+static int compareSrcWithThreshold(parse_t* src, uint64_t u, int roundingMode)
 {
   // parse u as binary64
   const uint64_t BIT53 = (uint64_t)1 << 53;
@@ -511,14 +535,18 @@ static int compareSrcWithMidpoint(parse_t* src, uint64_t u)
   const uint64_t BIT54 = (uint64_t)1 << 54;
   const uint64_t MSK54 = BIT54 - 1;
 
-  // calculate Thr - a mid point between representable FP numbers
-  uint64_t mnt = ((u*2) & MSK53) | 1 | BIT53;// += 0.5 ULP
+  // calculate Thr
+  if (roundingMode == FE_TOWARDZERO)
+    u += 1; // += ULP, Thr = a next representable FP numbers
+  uint64_t mnt = ((u*2) & MSK53) | BIT53;
   int biasedExp = u >> 52;
   if (biasedExp == 0) { // subnormal
     mnt       &= MSK53;
     biasedExp  = 1;
   }
   int nBe = 1023 + 53 - biasedExp; // reversed binary exponent. Thr = mnt*2**(-nBe)
+  if (roundingMode == FE_TONEAREST)
+    mnt += 1; // += 0.5 ULP, Thr = a mid point between representable FP numbers
 
   uint64_t x[18]; // buffer for mantissa words, LS words first.
                   // x[] hold mantissa either of integer part of the source string or of Thr
