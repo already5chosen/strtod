@@ -161,6 +161,13 @@ static __inline int __builtin_clzll(uint64_t x) {
 }
 #endif
 
+static bool is_case_insensitively_equal(const char* x, const char* uppercaseRef, unsigned len) {
+  for (unsigned i = 0; i < len; ++i)
+    if (toupper(x[i]) != uppercaseRef[i])
+      return false;
+  return true;
+}
+
 double my_strtod(const char* str, char** str_end)
 {
   if (str_end)
@@ -185,10 +192,19 @@ double my_strtod(const char* str, char** str_end)
 
   struct lconv *lc = localeconv();
   char dotC = lc->decimal_point[0];
-  const char* p = str;
   const char* effDot = NULL; // no dot
+  if (*str == dotC) { // dot found before the 1st digit
+    ++str;
+    effDot = str; // record the next position, when dot found before the end of mnt
+    dotC = '0';
+  }
+
+  const uint64_t uINF = (uint64_t)2047 << 52;
+  const uint64_t uNaN = (uint64_t)-1 >> 1;
 
   // accumulate mantissa
+  uint64_t signBit = (neg=='-') ? (uint64_t)1 << 63 : 0;
+  const char* p = str;
   const uint64_t MNT_LIMIT = (MNT_MAX - 9)/10;
   uint64_t mnt = 0;
   const char* eom = NULL;    // end of part of mantissa accumulated within mnt
@@ -234,9 +250,26 @@ double my_strtod(const char* str, char** str_end)
     if (*p != dotC) {
       eom  = p;
       // check if there were digits
-      if (mnt==0 && p - str <= 1) {
-        if (p==str || effDot != 0)
-          return 0; // there were no digits
+      if (p==str) { // there were no digits
+        uint64_t ret = 0;
+        if (effDot == 0) {
+          // look for Inf/Nan
+          if (is_case_insensitively_equal(p, "INF", 3)) {
+            ret = uINF;
+            p += 3; // "inf" found, but it could be "infinity"
+            if (is_case_insensitively_equal(p, "INITY", 5))
+              p += 5;
+          } else if (is_case_insensitively_equal(&p[1], "NAN", 3)) {
+            ret = uNaN;
+            p += 3;
+          }
+        }
+        if (ret) {
+          ret |= signBit;
+          if (str_end)
+            *str_end = (char*)p;
+        }
+        return u2d(ret);
       }
       break;
     }
@@ -297,14 +330,11 @@ double my_strtod(const char* str, char** str_end)
   if (str_end)
     *str_end = (char*)ret_end;
 
-  uint64_t signBit = (neg=='-') ? (uint64_t)1 << 63 : 0;
-
   // Convert to floating point
   // Calculate upper and lower estimates
   if (mnt == 0)
     return u2d(signBit);
 
-  const uint64_t uINF = (uint64_t)2047 << 52;
   if (decExp > 308)
     return u2d(uINF+signBit);
 
