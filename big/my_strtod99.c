@@ -259,7 +259,7 @@ double my_strtod(const char* str, char** str_end)
             p += 3; // "inf" found, but it could be "infinity"
             if (is_case_insensitively_equal(p, "INITY", 5))
               p += 5;
-          } else if (is_case_insensitively_equal(&p[1], "NAN", 3)) {
+          } else if (is_case_insensitively_equal(p, "NAN", 3)) {
             ret = uNaN;
             p += 3;
           }
