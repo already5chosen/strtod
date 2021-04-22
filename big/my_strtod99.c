@@ -28,6 +28,7 @@ typedef struct {
 } parse_t;
 
 static int compareSrcWithThreshold(parse_t* src, uint64_t u, int roundingMode); // return -1,0,+1 when source string respectively <, = or > of u2d(u)+0.5ULP
+static uint64_t convertHexFloat(uint64_t mnt, int binExp, int roundingMode);
 
 static double u2d(uint64_t x) {
   double y;
@@ -205,11 +206,13 @@ double my_strtod(const char* str, char** str_end)
   // accumulate mantissa
   uint64_t signBit = (neg=='-') ? (uint64_t)1 << 63 : 0;
   const char* p = str;
-  const uint64_t MNT_LIMIT = (MNT_MAX - 9)/10;
+  const uint64_t DEC_MNT_LIMIT = (MNT_MAX - 9)/10;
+  const uint64_t HEX_MNT_LIMIT = (uint64_t)1 << 56;
   uint64_t mnt = 0;
   const char* eom = NULL;    // end of part of mantissa accumulated within mnt
   const char* dot = NULL;    // dot character. Recorded only when dot encountered at or after eom
   const char* lastDig = NULL;// last non-zero digit of mantissa. Recorded only when there is at least one non-zero digit after eom
+  bool hexFloat = false;
   for (;;) {
     for (;;) {
       unsigned char dig = *(unsigned char*)p - '0';
@@ -217,7 +220,7 @@ double my_strtod(const char* str, char** str_end)
         break; // non-digit
       ++p;
       mnt = mnt * 10 + dig;
-      if (UNLIKELY(mnt > MNT_LIMIT)) {
+      if (UNLIKELY(mnt > DEC_MNT_LIMIT)) {
         // No more room in mnt.
         eom  = p;
         // Scan throw the rest of mantissa digits
@@ -249,27 +252,94 @@ double my_strtod(const char* str, char** str_end)
     // non-digit
     if (*p != dotC) {
       eom  = p;
-      // check if there were digits
-      if (p==str) { // there were no digits
-        uint64_t ret = 0;
-        if (effDot == 0) {
-          // look for Inf/Nan
-          if (is_case_insensitively_equal(p, "INF", 3)) {
-            ret = uINF;
-            p += 3; // "inf" found, but it could be "infinity"
-            if (is_case_insensitively_equal(p, "INITY", 5))
-              p += 5;
-          } else if (is_case_insensitively_equal(p, "NAN", 3)) {
-            ret = uNaN;
-            p += 3;
+      if (mnt==0) {
+        // Check for various non-common possibilities : illegal strings, inf, nan, hexadecimal floating-point
+        // check if there were digits
+        if (p==str) { // there were no digits
+          uint64_t ret = 0;
+          if (effDot == 0) {
+            // look for Inf/Nan
+            if (is_case_insensitively_equal(p, "INF", 3)) {
+              ret = uINF;
+              p += 3; // "inf" found, but it could be "infinity"
+              if (is_case_insensitively_equal(p, "INITY", 5))
+                p += 5;
+            } else if (is_case_insensitively_equal(p, "NAN", 3)) {
+              ret = uNaN;
+              p += 3;
+            }
+          }
+          if (ret) {
+            ret |= signBit;
+            if (str_end)
+              *str_end = (char*)p;
+          }
+          return u2d(ret);
+        } else if (p-str == 1 && effDot == 0 && (*p == 'X' || *p == 'x')) {
+          // "0x" prefix - possibly, hexadecimal floating-point
+          const char* hexstr = p + 1;
+          if (*hexstr == dotC) { // dot found before the 1st digit
+            ++hexstr;
+            effDot = hexstr; // record the next position, when dot found before the end of mnt
+            dotC = '0';
+          }
+          p = hexstr;
+          for (;;) {
+            for (;;) {
+              unsigned char uc = *(unsigned char*)p;
+              unsigned char dig = uc - '0';
+              if (dig > 9) {
+                dig = uc - 'A';
+                if (dig > 5) {
+                  dig = uc - 'a';
+                  if (dig > 5) {
+                    break; // non-digit
+                  }
+                }
+                dig += 10; // 'A' to 'F' or 'a' to 'f'
+              }
+              ++p;
+              mnt = mnt * 16 + dig;
+              if (UNLIKELY(mnt > HEX_MNT_LIMIT)) {
+                // No more room in mnt.
+                eom  = p;
+                hexFloat = true;
+                // Scan throw the rest of mantissa digits
+                char hexStickyChars = '0'; // all non-dot characters after mnt ored together
+                for (;;) {
+                  char c = *p;
+                  while ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f')) {
+                    c = *++p;
+                    hexStickyChars |= c;
+                  }
+                  if (c != dotC)
+                    break;
+                  // dot found
+                  dot = effDot = p;
+                  dotC = '0';
+                  ++p;
+                }
+                if (hexStickyChars != '0')
+                  mnt |= 1;
+                goto mantissa_done;
+              }
+            }
+            if (*p != dotC) {
+              if (p==hexstr) { // there were no digits so input is not a hexadecimal floating-point
+                p = eom; // roll back parsing state
+                effDot = NULL;
+              } else {
+                eom = p;
+                hexFloat = true;
+              }
+              break;
+            }
+            // dot found
+            effDot = p + 1; // record the next position, when dot found before the end of mnt
+            dotC = '0';
+            ++p;
           }
         }
-        if (ret) {
-          ret |= signBit;
-          if (str_end)
-            *str_end = (char*)p;
-        }
-        return u2d(ret);
       }
       break;
     }
@@ -284,59 +354,67 @@ double my_strtod(const char* str, char** str_end)
     return 0; // input too long
 
   // parse part of the string after last digit of mantissa
-  if (!effDot) // there was no dot
+  if (!effDot) // there were no dot
     effDot = p;
   int decExp = (int)(effDot - eom);
+  int binExp = decExp*4;
 
   const char* ret_end = p;
+  bool exponentCharFound = false;
   switch (*p) {
     case 'e':
     case 'E':
-    { // exponent
-      ++p;
-      // process sign
-      char expNeg = *p;
-      switch (expNeg) {
-        case '+':
-        case '-':
-          ++p;
-          break;
-        default:
-          break;
-      }
-      if (*p >= '0' && *p <= '9') { // exponent present
-        // accumulate decExp
-        int decExpAcc = 0;
-        for (;;) {
-          unsigned dig = *(unsigned char*)p - '0';
-          if (dig > 9)
-            break;
-          ++p;
-          if (LIKELY(decExpAcc < INPLEN_MAX*2))
-            decExpAcc = decExpAcc * 10 + dig;
-        }
-        if (expNeg=='-')
-          decExpAcc = -decExpAcc;
-        decExp += decExpAcc;
-        ret_end = p;
-      }
-    }
-      break; // exponent
+      // decimal exponent
+      exponentCharFound = true;
+      break;
+
+    case 'p':
+    case 'P':
+      // binary  exponent
+      exponentCharFound = hexFloat;
+      break;
 
     default:
       break;
+  }
+
+  if (exponentCharFound) {
+    ++p;
+    // process sign
+    char expNeg = *p;
+    switch (expNeg) {
+      case '+':
+      case '-':
+        ++p;
+        break;
+      default:
+        break;
+    }
+    if (*p >= '0' && *p <= '9') { // exponent present
+      // accumulate decExp or binExp
+      int expAcc = 0;
+      for (;;) {
+        unsigned dig = *(unsigned char*)p - '0';
+        if (dig > 9)
+          break;
+        ++p;
+        if (LIKELY(expAcc < INPLEN_MAX*2))
+          expAcc = expAcc * 10 + dig;
+      }
+      if (expNeg=='-')
+        expAcc = -expAcc;
+      decExp += expAcc;
+      binExp += expAcc;
+      ret_end = p;
+    }
   }
 
   if (str_end)
     *str_end = (char*)ret_end;
 
   // Convert to floating point
-  // Calculate upper and lower estimates
   if (mnt == 0)
     return u2d(signBit);
-
-  if (decExp > 308)
-    return u2d(uINF+signBit);
 
   int roundingMode = fegetround();
   // translate up/down rounding modes to toward zero/away from zero (represented by FE_UPWARD)
@@ -351,10 +429,18 @@ double my_strtod(const char* str, char** str_end)
       break;
   }
 
+  if (hexFloat)
+    return u2d(convertHexFloat(mnt, binExp, roundingMode)+signBit);
+
+  // Convert decimal
+  if (decExp > 308)
+    return u2d(uINF+signBit);
+
   if (decExp < -342)
     return u2d(roundingMode!=FE_UPWARD ? signBit : signBit | 1);
 
   // decExp range [-342:308]
+  // Calculate upper and lower estimates
   int ie = decExp + 13*28; // range [22:672;
   int iH = ie / 28; // index in tab28, range [0:24]
   int iL = ie % 28; // index in tab1,  range [0:27]
@@ -892,4 +978,39 @@ static int compareSrcWithThreshold(parse_t* src, uint64_t u, int roundingMode)
   }
 
   return 0;
+}
+
+static uint64_t convertHexFloat(uint64_t inpMnt, int binExp, int roundingMode)
+{
+  // normalize inpMnt
+  int lsh = __builtin_clzll(inpMnt);
+  inpMnt <<= lsh;
+  binExp  -= lsh;
+
+  const uint64_t uINF = (uint64_t)2047 << 52;
+  int be = binExp + 1023+63; // biased exponent
+  if (be > 1023*2)
+    return uINF;
+
+  uint64_t mnt = inpMnt >> 11; // isolate data bits
+  int mnt_bits = 53;
+  if (be < 1) {
+    // subnormal
+    int rsh = 1-be;
+    mnt_bits -= rsh;
+    be = 0;
+    if (mnt_bits < 0)
+      return roundingMode == FE_UPWARD ? 1 : 0;
+    mnt >>= rsh;
+  }
+  uint64_t tail = inpMnt << mnt_bits;       // shift away data bits
+  uint64_t res = mnt & ((uint64_t)-1 >>12); // mask out implied '1'
+  res |= (uint64_t)be << 52;                // + biased exponent
+  if (roundingMode == FE_TONEAREST) {
+    tail |= (mnt & 1);                      // break tie to even
+    res += (tail > ((uint64_t)1 << 63));    // round to nearest
+  } else if (roundingMode == FE_UPWARD) {
+    res += (tail != 0);                     // round up
+  }
+  return res;
 }
