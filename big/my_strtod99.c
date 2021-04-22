@@ -28,7 +28,6 @@ typedef struct {
 } parse_t;
 
 static int compareSrcWithThreshold(parse_t* src, uint64_t u, int roundingMode); // return -1,0,+1 when source string respectively <, = or > of u2d(u)+0.5ULP
-static uint64_t convertHexFloat(uint64_t mnt, int binExp, int roundingMode);
 
 static double u2d(uint64_t x) {
   double y;
@@ -429,90 +428,94 @@ double my_strtod(const char* str, char** str_end)
       break;
   }
 
-  if (hexFloat)
-    return u2d(convertHexFloat(mnt, binExp, roundingMode)+signBit);
-
-  // Convert decimal
-  if (decExp > 308)
-    return u2d(uINF+signBit);
-
-  if (decExp < -342)
-    return u2d(roundingMode!=FE_UPWARD ? signBit : signBit | 1);
-
-  // decExp range [-342:308]
-  // Calculate upper and lower estimates
-  int ie = decExp + 13*28; // range [22:672;
-  int iH = ie / 28; // index in tab28, range [0:24]
-  int iL = ie % 28; // index in tab1,  range [0:27]
-
-  uint64_t mntL = mnt;
-  uint64_t mntU = mntL + (lastDig != 0);
-  // multiply mntL,mntH by 10**decExp
-#ifdef _MSC_VER
   uint64_t m1L, m2L, m1U, m2U;
-  m1L = _umul128(mntL, tab1[iL], &m2L);
-  m1U = _umul128(mntU, tab1[iL], &m2U);
-#else
-  unsigned __int128 mxL = (unsigned __int128)mntL * tab1[iL];
-  unsigned __int128 mxU = (unsigned __int128)mntU * tab1[iL];
-  uint64_t m2L = (uint64_t)(mxL >> 64);
-  uint64_t m1L = (uint64_t)(mxL);
-  uint64_t m2U = (uint64_t)(mxU >> 64);
-  uint64_t m1U = (uint64_t)(mxU);
-#endif
-  int be = iL; // binary exponent
+  int be; // binary exponent
   uint64_t m0L = 0;
   uint64_t m0U = 0;
-  // up to this point multiplication is exact
-  if (iH != 13) {
-    // this multiplication is approximate, so we need different coefficients for upper and lower estimates
-    // be += (int)ceil((iH-13)*93.0139866568461);
-    be += (((iH-13)*24383059) >> 18) + 1;
-    uint64_t x28 = tab28[iH];
+  if (!hexFloat) {
+    // Convert decimal
+    if (decExp > 308)
+      return u2d(uINF+signBit);
+
+    if (decExp < -342)
+      return u2d(roundingMode!=FE_UPWARD ? signBit : signBit | 1);
+
+    // decExp range [-342:308]
+    // Calculate upper and lower estimates
+    int ie = decExp + 13*28; // range [22:672;
+    int iH = ie / 28; // index in tab28, range [0:24]
+    int iL = ie % 28; // index in tab1,  range [0:27]
+
+    uint64_t mntL = mnt;
+    uint64_t mntU = mntL + (lastDig != 0);
+    // multiply mntL,mntH by 10**decExp
 #ifdef _MSC_VER
-    uint64_t m0Lh;
-    m0L = _umul128(m1L, x28, &m0Lh);
-    m1L = _umul128(m2L, x28, &m2L);
-    unsigned char carry = _addcarry_u64(0, m1L, m0Lh, &m1L);
-    _addcarry_u64(carry, m2L, 0, &m2L);
+    m1L = _umul128(mntL, tab1[iL], &m2L);
+    m1U = _umul128(mntU, tab1[iL], &m2U);
 #else
-    unsigned __int128 mlL, mlU;
-    mlL = (unsigned __int128)m1L * x28;
-    mxL = (unsigned __int128)m2L * x28;
-    mxL += (uint64_t)(mlL >> 64);
+    unsigned __int128 mxL = (unsigned __int128)mntL * tab1[iL];
+    unsigned __int128 mxU = (unsigned __int128)mntU * tab1[iL];
     m2L = (uint64_t)(mxL >> 64);
     m1L = (uint64_t)(mxL);
-    m0L = (uint64_t)(mlL);
+    m2U = (uint64_t)(mxU >> 64);
+    m1U = (uint64_t)(mxU);
+#endif
+    be = iL; // binary exponent
+    // up to this point multiplication is exact
+    if (iH != 13) {
+      // this multiplication is approximate, so we need different coefficients for upper and lower estimates
+      // be += (int)ceil((iH-13)*93.0139866568461);
+      be += (((iH-13)*24383059) >> 18) + 1;
+      uint64_t x28 = tab28[iH];
+#ifdef _MSC_VER
+      uint64_t m0Lh;
+      m0L = _umul128(m1L, x28, &m0Lh);
+      m1L = _umul128(m2L, x28, &m2L);
+      unsigned char carry = _addcarry_u64(0, m1L, m0Lh, &m1L);
+      _addcarry_u64(carry, m2L, 0, &m2L);
+#else
+      unsigned __int128 mlL, mlU;
+      mlL = (unsigned __int128)m1L * x28;
+      mxL = (unsigned __int128)m2L * x28;
+      mxL += (uint64_t)(mlL >> 64);
+      m2L = (uint64_t)(mxL >> 64);
+      m1L = (uint64_t)(mxL);
+      m0L = (uint64_t)(mlL);
 #endif
 
 #ifdef _MSC_VER
-    uint64_t m0Uh;
-    m0U = _umul128(m1U, x28+1, &m0Uh);
-    m1U = _umul128(m2U, x28+1, &m2U);
-    carry = _addcarry_u64(0, m1U, m0Uh, &m1U);
-    _addcarry_u64(carry, m2U, 0, &m2U);
+      uint64_t m0Uh;
+      m0U = _umul128(m1U, x28+1, &m0Uh);
+      m1U = _umul128(m2U, x28+1, &m2U);
+      carry = _addcarry_u64(0, m1U, m0Uh, &m1U);
+      _addcarry_u64(carry, m2U, 0, &m2U);
 #else
-    mlU = (unsigned __int128)m1U * (x28+1);
-    mxU = (unsigned __int128)m2U * (x28+1);
-    mxU += (uint64_t)(mlU >> 64);
-    m2U = (uint64_t)(mxU >> 64);
-    m1U = (uint64_t)(mxU);
-    m0U = (uint64_t)(mlU);
+      mlU = (unsigned __int128)m1U * (x28+1);
+      mxU = (unsigned __int128)m2U * (x28+1);
+      mxU += (uint64_t)(mlU >> 64);
+      m2U = (uint64_t)(mxU >> 64);
+      m1U = (uint64_t)(mxU);
+      m0U = (uint64_t)(mlU);
 #endif
+
+      if (m2U == 0) {
+        be -= 64;
+        m2L = m1L; m1L = m0L; m0L = 0;
+        m2U = m1U; m1U = m0U; m0U = 0;
+      }
+    }
 
     if (m2U == 0) {
       be -= 64;
-      m2L = m1L; m1L = m0L; m0L = 0;
-      m2U = m1U; m1U = m0U; m0U = 0;
+      m2L = m1L; m1L = 0;
+      m2U = m1U; m1U = 0;
     }
+  } else {
+    m2L = m2U = mnt;
+    m1L = m1U = 0;
+    be  = binExp - 64;
+    // return u2d(convertHexFloat(mnt, binExp, roundingMode)+signBit);
   }
-
-  if (m2U == 0) {
-    be -= 64;
-    m2L = m1L; m1L = 0;
-    m2U = m1U; m1U = 0;
-  }
-
   // normalize m2U:M1U
   int lsh = __builtin_clzll(m2U);
   if (lsh) {
@@ -978,39 +981,4 @@ static int compareSrcWithThreshold(parse_t* src, uint64_t u, int roundingMode)
   }
 
   return 0;
-}
-
-static uint64_t convertHexFloat(uint64_t inpMnt, int binExp, int roundingMode)
-{
-  // normalize inpMnt
-  int lsh = __builtin_clzll(inpMnt);
-  inpMnt <<= lsh;
-  binExp  -= lsh;
-
-  const uint64_t uINF = (uint64_t)2047 << 52;
-  int be = binExp + 1023+63; // biased exponent
-  if (be > 1023*2)
-    return uINF;
-
-  uint64_t mnt = inpMnt >> 11; // isolate data bits
-  int mnt_bits = 53;
-  if (be < 1) {
-    // subnormal
-    int rsh = 1-be;
-    mnt_bits -= rsh;
-    be = 0;
-    if (mnt_bits < 0)
-      return roundingMode == FE_UPWARD ? 1 : 0;
-    mnt >>= rsh;
-  }
-  uint64_t tail = inpMnt << mnt_bits;       // shift away data bits
-  uint64_t res = mnt & ((uint64_t)-1 >>12); // mask out implied '1'
-  res |= (uint64_t)be << 52;                // + biased exponent
-  if (roundingMode == FE_TONEAREST) {
-    tail |= (mnt & 1);                      // break tie to even
-    res += (tail > ((uint64_t)1 << 63));    // round to nearest
-  } else if (roundingMode == FE_UPWARD) {
-    res += (tail != 0);                     // round up
-  }
-  return res;
 }
