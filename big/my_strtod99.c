@@ -187,9 +187,6 @@ double my_strtod(const char* str, char** str_end)
       break;
   }
 
-  if (str_end)
-    *str_end = (char*)str;
-
   struct lconv *lc = localeconv();
   char dotC = lc->decimal_point[0];
   const char* effDot = NULL; // no dot
